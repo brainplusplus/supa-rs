@@ -1,0 +1,31 @@
+[package]
+name = "suparust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["multipart"] }
+tokio = { version = "1", features = ["full", "process"] }
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio", "uuid", "json", "time", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+jsonwebtoken = "9"
+argon2 = "0.5"
+tokio-tungstenite = "0.21"
+object_store = "0.10"
+nom = "7"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+dotenvy = "0.15.7"
+rand = "0.8"
+base64 = "0.21"
+hex = "0.4"
+axum-core = "0.5.6"
+axum-extra = "0.12.5"
+axum-macros = "0.5.0"
+axum-server = "0.8.0"
+mime = "0.3.17"
+futures-util = "0.3.32"
+tokio-util = { version = "0.7.18", features = ["io"] }
