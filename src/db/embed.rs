@@ -30,7 +30,13 @@ impl EmbeddedPostgres {
         tracing::info!("Setting up embedded PostgreSQL (first run downloads binary ~50MB)...");
         let mut pg = PgEmbed::new(pg_settings, fetch_settings).await?;
 
-        pg.setup().await?;
+        // setup() runs initdb — skip if data dir already initialized
+        let pg_version_file = PathBuf::from(data_dir).join("PG_VERSION");
+        if pg_version_file.exists() {
+            tracing::info!("Existing data directory detected, skipping initdb");
+        } else {
+            pg.setup().await?;
+        }
 
         tracing::info!("Starting embedded PostgreSQL in {}", data_dir);
         pg.start_db().await?;
