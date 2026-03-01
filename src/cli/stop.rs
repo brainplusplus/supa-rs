@@ -1,30 +1,84 @@
 const PID_FILE: &str = ".suparust.pid";
 
 pub fn cmd_stop() {
-    let pid_str = match std::fs::read_to_string(PID_FILE) {
-        Ok(s) => s,
-        Err(_) => {
-            println!("No server running (no {} found)", PID_FILE);
-            return;
-        }
-    };
+    match std::fs::read_to_string(PID_FILE) {
+        Ok(pid_str) => {
+            let pid: u32 = match pid_str.trim().parse() {
+                Ok(p) if p > 0 => p,
+                _ => {
+                    println!("Invalid PID in {} — deleting", PID_FILE);
+                    std::fs::remove_file(PID_FILE).ok();
+                    return;
+                }
+            };
 
-    let pid: u32 = match pid_str.trim().parse() {
-        Ok(p) if p > 0 => p,
-        _ => {
-            println!("Invalid PID in {} — deleting", PID_FILE);
+            let was_running = kill_pid(pid);
             std::fs::remove_file(PID_FILE).ok();
-            return;
+
+            if was_running {
+                println!("SupaRust stopped (PID {})", pid);
+            } else {
+                println!("Process {} was not running — PID file cleaned up", pid);
+            }
         }
-    };
+        Err(_) => {
+            // No PID file — try to find the process by port
+            dotenvy::dotenv().ok();
+            let port = std::env::var("SUPARUST_PORT")
+                .or_else(|_| std::env::var("PORT"))
+                .unwrap_or_else(|_| "3000".to_string());
 
-    let was_running = kill_pid(pid);
-    std::fs::remove_file(PID_FILE).ok();
+            println!("No {} found — searching for process on port {}...", PID_FILE, port);
 
-    if was_running {
-        println!("SupaRust stopped (PID {})", pid);
-    } else {
-        println!("Process {} was not running — PID file cleaned up", pid);
+            match find_pid_on_port(&port) {
+                Some(pid) => {
+                    if kill_pid(pid) {
+                        println!("SupaRust stopped (PID {} found via port {})", pid, port);
+                    } else {
+                        println!("Process {} was not running", pid);
+                    }
+                }
+                None => {
+                    println!("No process found on port {} — server is not running", port);
+                }
+            }
+        }
+    }
+}
+
+/// Find the PID of the process listening on the given port.
+fn find_pid_on_port(port: &str) -> Option<u32> {
+    #[cfg(target_os = "windows")]
+    {
+        // netstat -ano shows: Proto  Local  Foreign  State  PID
+        let out = std::process::Command::new("netstat")
+            .args(["-ano"])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let needle = format!(":{} ", port);
+        for line in text.lines() {
+            if line.contains(&needle) && line.to_uppercase().contains("LISTENING") {
+                // Last token is PID
+                if let Some(pid_str) = line.split_whitespace().last() {
+                    if let Ok(pid) = pid_str.parse::<u32>() {
+                        return Some(pid);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // lsof -ti :PORT returns the PID directly
+        let out = std::process::Command::new("lsof")
+            .args(["-ti", &format!(":{}", port)])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.trim().lines().next()?.parse::<u32>().ok()
     }
 }
 

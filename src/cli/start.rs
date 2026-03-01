@@ -12,7 +12,19 @@ pub async fn cmd_start_foreground() {
     tracing::info!("PID {} written to {}", pid, PID_FILE);
 
     if let Err(e) = run_server().await {
-        tracing::error!("Server error: {}", e);
+        let msg = e.to_string();
+        if msg.contains("10048") || msg.contains("address in use") || msg.contains("Address already in use") {
+            dotenvy::dotenv().ok();
+            let port = std::env::var("SUPARUST_PORT")
+                .or_else(|_| std::env::var("PORT"))
+                .unwrap_or_else(|_| "3000".to_string());
+            tracing::error!(
+                "Port {} is already in use. Run `suparust stop` to kill the existing process.",
+                port
+            );
+        } else {
+            tracing::error!("Server error: {}", e);
+        }
     }
 
     std::fs::remove_file(PID_FILE).ok();
