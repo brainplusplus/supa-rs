@@ -188,8 +188,10 @@ fn parse_query_params(params: &HashMap<String, String>) -> Result<(Vec<crate::pa
             }
             "apikey" => {}
             _ => {
-                // assume it's a filter col=op.val
-                let filter_str = format!("{}={}", k, v);
+                // supabase-js sends: ?email=eq.test@suparust.dev
+                // key="email", value="eq.test@suparust.dev"
+                // parser expects: "email.eq.test@suparust.dev"
+                let filter_str = format!("{}.{}", k, v);
                 let filter = parse_filter(&filter_str).map_err(|e| PostgRestError::from(e.to_string()))?;
                 filters.push(filter);
             }

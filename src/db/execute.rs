@@ -12,13 +12,8 @@ pub async fn execute_query(
 
     for (name, val) in rls.to_set_local_statements() {
         if name.to_lowercase() == "role" {
-            // service_role bypasses RLS — skip SET LOCAL ROLE so query runs
-            // as the superuser (postgres), which has no RLS restrictions
-            if val == "service_role" {
-                tracing::debug!("service_role: skipping SET LOCAL ROLE (RLS bypass)");
-                continue;
-            }
-            tracing::info!("SET LOCAL ROLE executing with value: '{}'", val);
+            // service_role has BYPASSRLS attribute — SET LOCAL ROLE so PG enforces it
+            // anon / authenticated — normal RLS applies
             let stmt = format!("SET LOCAL ROLE {}", val);
             sqlx::query(&stmt).execute(&mut *tx).await?;
         } else {
