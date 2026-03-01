@@ -45,10 +45,12 @@ impl EmbeddedPostgres {
 
 impl Drop for EmbeddedPostgres {
     fn drop(&mut self) {
-        let rt = tokio::runtime::Handle::try_current();
-        if let Ok(handle) = rt {
-            handle.block_on(async {
-                let _ = self.pg.stop_db().await;
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let pg = &mut self.pg;
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let _ = pg.stop_db().await;
+                });
             });
         }
     }

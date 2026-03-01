@@ -59,15 +59,15 @@ pub fn router(pool: PgPool, storage_root: String, jwt_secret: String) -> Router 
     Router::new()
         // Bucket routes
         .route("/bucket",     post(create_bucket).get(list_buckets))
-        .route("/bucket/:id", get(get_bucket).delete(delete_bucket))
+        .route("/bucket/{id}", get(get_bucket).delete(delete_bucket))
         // Signed URL serve (before wildcard to avoid conflict)
-        .route("/object/signedURL/:token", get(serve_signed_url))
+        .route("/object/signedURL/{token}", get(serve_signed_url))
         // Public download (no JWT)
-        .route("/object/public/:bucket/*path", get(download_public))
+        .route("/object/public/{bucket}/{*path}", get(download_public))
         // Sign URL generation
-        .route("/object/sign/:bucket/*path", post(create_signed_url))
+        .route("/object/sign/{bucket}/{*path}", post(create_signed_url))
         // Authenticated object operations
-        .route("/object/:bucket/*path",
+        .route("/object/{bucket}/{*path}",
             post(upload_object)
             .get(download_object)
             .delete(delete_object)

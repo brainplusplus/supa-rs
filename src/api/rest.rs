@@ -19,10 +19,10 @@ use crate::parser::filter::parse_filter;
 
 pub fn router(pool: PgPool, jwt_secret: String) -> axum::Router {
     Router::new()
-        .route("/:table", get(handle_select))
-        .route("/:table", post(handle_insert))
-        .route("/:table", patch(handle_update))
-        .route("/:table", delete(handle_delete))
+        .route("/{table}", get(handle_select))
+        .route("/{table}", post(handle_insert))
+        .route("/{table}", patch(handle_update))
+        .route("/{table}", delete(handle_delete))
         .with_state(AppState { pool, jwt_secret })
 }
 
