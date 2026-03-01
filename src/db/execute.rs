@@ -1,19 +1,18 @@
 use sqlx::{PgPool, Row, types::Json};
 use serde_json::Value;
+use sea_query_binder::SqlxValues;
 use crate::sql::rls::RlsContext;
 
 pub async fn execute_query(
     pool: &PgPool,
     sql: &str,
-    params: Vec<Value>,
+    values: SqlxValues,
     rls: &RlsContext,
 ) -> Result<Value, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
     for (name, val) in rls.to_set_local_statements() {
         if name.to_lowercase() == "role" {
-            // service_role has BYPASSRLS attribute — SET LOCAL ROLE so PG enforces it
-            // anon / authenticated — normal RLS applies
             let stmt = format!("SET LOCAL ROLE {}", val);
             sqlx::query(&stmt).execute(&mut *tx).await?;
         } else {
@@ -22,20 +21,9 @@ pub async fn execute_query(
         }
     }
 
-    // Construct the query with bindings
-    let mut q = sqlx::query(sql);
-
-    // Bind parameters
-    for param in params {
-        let param_val = match param {
-            Value::String(s) => s,
-            _ => param.to_string(), // Simplified for now
-        };
-        q = q.bind(param_val);
-    }
-
-    // Gunakan fetch_optional, bukan fetch_one
-    let result = q.fetch_optional(&mut *tx).await?;
+    let result = sqlx::query_with(sql, values)
+        .fetch_optional(&mut *tx)
+        .await?;
 
     let output = match result {
         Some(row) => {
