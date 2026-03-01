@@ -3,6 +3,10 @@ data/
 /temp
 app.log
 nul
+null
+patch.js
 .suparust.pid
 .env
 node_modules
+.claude
+.cursor
