@@ -2,3 +2,7 @@
 data/
 /temp
 app.log
+nul
+.suparust.pid
+.env
+node_modules

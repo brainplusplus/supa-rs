@@ -168,3 +168,101 @@ describe('Storage', () => {
     expect(error).toBeNull()
   })
 })
+
+// ============================================================
+// Suite 4: Admin — Service Role RLS Bypass
+// ============================================================
+
+const BASE_URL = 'http://127.0.0.1:3000'
+const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFydXN0IiwiaWF0IjoxNzcyMTU1MzQ4fQ.yvMr38AEPO8N-zkn_GSPtH71e7PHSDHS7GxQ-9PahE8'
+const SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYXJ1c3QiLCJpYXQiOjE3NzIxNTUzNDh9.Y1lzcK2qOGv6TH-mU896Kw8uRvYG0eXckvrFsKP3iK8'
+
+const adminClient = createClient(BASE_URL, SERVICE_KEY)
+const anonClient  = createClient(BASE_URL, ANON_KEY)
+
+describe('Admin — Service Role RLS Bypass', () => {
+
+  const adminEmail = `admin_seed_${Date.now()}@suparust.dev`
+  const adminPass  = 'AdminSeed123!'
+
+  // ── 4.1 Admin dapat membaca seluruh user (bypass RLS) ──
+  test('service_role can select all users', async () => {
+    const { data, error } = await adminClient
+      .from('users')
+      .select('id, email')
+    expect(error).toBeNull()
+    expect(Array.isArray(data)).toBe(true)
+    // service_role harus bisa lihat semua row — minimal 1 (test user dari Suite 1)
+    expect(data.length).toBeGreaterThan(0)
+  })
+
+  // ── 4.2 Anon TIDAK dapat membaca users (RLS menolak) ──
+  test('anon cannot select users — RLS denies', async () => {
+    const { data, error } = await anonClient
+      .from('users')
+      .select('id, email')
+    if (error) {
+      expect(error.message).toBeTruthy() // denied = ok
+    } else {
+      expect(data.length).toBe(0)
+    }
+  })
+
+  // ── 4.3 Admin dapat membuat bucket baru ──
+  test('service_role can create new bucket', async () => {
+    const { data, error } = await adminClient.storage
+      .createBucket('admin-test-bucket', { public: false })
+    // Acceptable: created fresh OR already exists
+    const ok = !error || error.message?.includes('already exists')
+    expect(ok).toBe(true)
+  })
+
+  // ── 4.4 Admin dapat upload ke bucket manapun tanpa RLS ──
+  test('service_role can upload to any bucket', async () => {
+    const blob = new Blob(['admin-seeded-content'], { type: 'text/plain' })
+    const { data, error } = await adminClient.storage
+      .from('admin-test-bucket')
+      .upload(`seed/admin_${Date.now()}.txt`, blob, {
+        contentType: 'text/plain',
+        upsert: true
+      })
+    expect(error).toBeNull()
+    expect(data.path || data.Key).toBeTruthy()
+  })
+
+  // ── 4.5 Anon TIDAK dapat upload ke private bucket ──
+  test('anon cannot upload to private bucket — RLS denies', async () => {
+    const blob = new Blob(['anon-attempt'], { type: 'text/plain' })
+    const { error } = await anonClient.storage
+      .from('admin-test-bucket')
+      .upload(`seed/anon_${Date.now()}.txt`, blob, { upsert: true })
+    // Harus ada error — RLS policy menolak anon insert
+    expect(error).toBeDefined()
+    expect(error.message).toBeTruthy()
+  })
+
+  // ── 4.6 Admin dapat list semua bucket ──
+  test('service_role can list all buckets', async () => {
+    const { data, error } = await adminClient.storage.listBuckets()
+    expect(error).toBeNull()
+    expect(Array.isArray(data)).toBe(true)
+    // Minimal ada 'avatars' (dari Suite 3) + 'admin-test-bucket' (4.3)
+    expect(data.length).toBeGreaterThanOrEqual(1)
+  })
+
+  // ── 4.7 Admin dapat delete bucket ──
+  test('service_role can delete bucket', async () => {
+    // Kosongkan dulu
+    const { data: files } = await adminClient.storage
+      .from('admin-test-bucket')
+      .list('seed')
+    if (files?.length) {
+      await adminClient.storage
+        .from('admin-test-bucket')
+        .remove(files.map(f => `seed/${f.name}`))
+    }
+    const { error } = await adminClient.storage
+      .deleteBucket('admin-test-bucket')
+    expect(error).toBeNull()
+  })
+})

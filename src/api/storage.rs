@@ -1,9 +1,9 @@
 use axum::{
     body::Bytes,
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -66,6 +66,10 @@ pub fn router(pool: PgPool, storage_root: String, jwt_secret: String) -> Router 
         .route("/object/public/{bucket}/{*path}", get(download_public))
         // Sign URL generation
         .route("/object/sign/{bucket}/{*path}", post(create_signed_url))
+        // List objects (must be BEFORE wildcard POST route)
+        .route("/object/list/{bucket}", post(list_objects))
+        // Batch delete (no path in URL — JSON body has prefixes)
+        .route("/object/{bucket}", delete(delete_objects))
         // Authenticated object operations
         .route("/object/{bucket}/{*path}",
             post(upload_object)
@@ -172,7 +176,7 @@ async fn create_bucket(
     let owner = claims.get("sub").and_then(|s| s.as_str()).unwrap_or("");
 
     let sql = "WITH r AS (INSERT INTO storage.buckets (id, name, owner, public) \
-         VALUES ($1, $2, NULLIF($3, '')::uuid, $4) RETURNING id, name, public) \
+         VALUES ($1, $2, NULLIF($3, '')::uuid, $4::boolean) RETURNING id, name, public) \
          SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM r";
 
     match run_rls_query(
@@ -262,8 +266,8 @@ async fn delete_bucket(
         Err(e) => return e,
     }
 
-    let delete_sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \
-        (DELETE FROM storage.buckets WHERE id = $1 RETURNING id) r";
+    let delete_sql = "WITH r AS (DELETE FROM storage.buckets WHERE id = $1 RETURNING id) \
+        SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM r";
 
     match run_rls_query(
         &state.pool, &role, &claims, "DELETE",
@@ -281,7 +285,7 @@ async fn upload_object(
     State(state): State<StorageState>,
     headers: HeaderMap,
     Path((bucket, path)): Path<(String, String)>,
-    body: Bytes,
+    mut multipart: Multipart,
 ) -> Response {
     let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
 
@@ -292,17 +296,26 @@ async fn upload_object(
     };
 
     let owner = claims.get("sub").and_then(|s| s.as_str()).unwrap_or("");
-    let content_type = headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    let size = body.len() as i64;
+
+    // Parse multipart: extract file field (has Content-Type), skip metadata fields
+    let mut file_bytes = Bytes::new();
+    let mut content_type = "application/octet-stream".to_string();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if let Some(ct) = field.content_type() {
+            content_type = ct.to_string();
+            if let Ok(b) = field.bytes().await {
+                file_bytes = b;
+            }
+        }
+        // else: metadata field (cacheControl etc.) — skip
+    }
+
+    let size = file_bytes.len() as i64;
     let metadata = json!({ "mimetype": content_type, "size": size });
 
     // 1. RLS check via metadata INSERT
     let meta_sql = "WITH r AS (INSERT INTO storage.objects (bucket_id, name, owner, metadata) \
-         VALUES ($1, $2, NULLIF($3, '')::uuid, $4) \
+         VALUES ($1, $2, NULLIF($3, '')::uuid, $4::jsonb) \
          ON CONFLICT (bucket_id, name) DO UPDATE \
          SET metadata = EXCLUDED.metadata, updated_at = now() \
          RETURNING id) \
@@ -334,7 +347,7 @@ async fn upload_object(
         }
     }
 
-    if let Err(e) = fs::write(&file_path, &body).await {
+    if let Err(e) = fs::write(&file_path, &file_bytes).await {
         tracing::error!("Failed to write file: {}", e);
         return StorageError::internal("Failed to write file");
     }
@@ -460,9 +473,9 @@ async fn delete_object(
     };
 
     // 1. RLS delete from DB first
-    let sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \
-        (DELETE FROM storage.objects \
-         WHERE bucket_id = $1 AND name = $2 RETURNING name) r";
+    let sql = "WITH r AS (DELETE FROM storage.objects \
+         WHERE bucket_id = $1 AND name = $2 RETURNING name) \
+         SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM r";
 
     match run_rls_query(
         &state.pool, &role, &claims, "DELETE",
@@ -482,6 +495,113 @@ async fn delete_object(
         }
         Err(e) => e,
     }
+}
+
+// ── List / Batch-delete Handlers ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct ListBody {
+    #[serde(default)]
+    prefix: String,
+    #[serde(default = "default_list_limit")]
+    limit: i64,
+    #[serde(default)]
+    offset: i64,
+}
+fn default_list_limit() -> i64 { 100 }
+
+async fn list_objects(
+    State(state): State<StorageState>,
+    headers: HeaderMap,
+    Path(bucket): Path<String>,
+    Json(body): Json<ListBody>,
+) -> Response {
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
+    let sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM (\
+        SELECT name, metadata, created_at, updated_at \
+        FROM storage.objects \
+        WHERE bucket_id = $1 \
+          AND ($2 = '' OR name LIKE ($2 || '/%') OR name = $2) \
+        ORDER BY name LIMIT $3::bigint OFFSET $4::bigint\
+        ) r";
+
+    match run_rls_query(
+        &state.pool, &role, &claims, "GET",
+        &format!("/storage/v1/object/list/{}", bucket),
+        sql,
+        vec![json!(bucket), json!(body.prefix), json!(body.limit), json!(body.offset)],
+    ).await {
+        Ok(v) => {
+            // Strip prefix from name so client gets relative paths
+            let result = if let Some(arr) = v.as_array() {
+                let prefix_strip = if body.prefix.is_empty() {
+                    String::new()
+                } else {
+                    format!("{}/", body.prefix)
+                };
+                let items: Vec<Value> = arr.iter().map(|item| {
+                    let name = item.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    let short = if !prefix_strip.is_empty() && name.starts_with(&prefix_strip) {
+                        name[prefix_strip.len()..].to_string()
+                    } else {
+                        name.to_string()
+                    };
+                    json!({
+                        "name": short,
+                        "metadata": item.get("metadata"),
+                        "created_at": item.get("created_at"),
+                        "updated_at": item.get("updated_at"),
+                    })
+                }).collect();
+                json!(items)
+            } else {
+                json!([])
+            };
+            (StatusCode::OK, Json(result)).into_response()
+        }
+        Err(e) => e,
+    }
+}
+
+#[derive(Deserialize)]
+struct DeleteObjectsBody {
+    prefixes: Vec<String>,
+}
+
+async fn delete_objects(
+    State(state): State<StorageState>,
+    headers: HeaderMap,
+    Path(bucket): Path<String>,
+    Json(body): Json<DeleteObjectsBody>,
+) -> Response {
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
+    let mut deleted: Vec<Value> = Vec::new();
+
+    for path in &body.prefixes {
+        let _safe = match sanitize_path(&bucket, path) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let sql = "WITH r AS (DELETE FROM storage.objects \
+             WHERE bucket_id = $1 AND name = $2 RETURNING name) \
+             SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM r";
+
+        if let Ok(v) = run_rls_query(
+            &state.pool, &role, &claims, "DELETE",
+            &format!("/storage/v1/object/{}/{}", bucket, path),
+            sql, vec![json!(bucket), json!(path)],
+        ).await {
+            if let Some(arr) = v.as_array() {
+                if !arr.is_empty() {
+                    let file_path = physical_path(&state.storage_root, &bucket, path);
+                    let _ = fs::remove_file(&file_path).await;
+                    deleted.push(json!({ "name": path }));
+                }
+            }
+        }
+    }
+
+    (StatusCode::OK, Json(json!(deleted))).into_response()
 }
 
 // ── Signed URL ────────────────────────────────────────────────────────────────
