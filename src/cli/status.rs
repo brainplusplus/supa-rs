@@ -1,12 +1,13 @@
 pub fn cmd_status() {
     dotenvy::dotenv().ok();
+
     let port = std::env::var("SUPARUST_PORT")
         .or_else(|_| std::env::var("PORT"))
         .unwrap_or_else(|_| "3000".to_string());
 
-    let pid = std::fs::read_to_string(".suparust.pid")
+    let pid_raw = std::fs::read_to_string(".suparust.pid")
         .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| "(no pid file)".to_string());
+        .ok();
 
     let addr = format!("127.0.0.1:{}", port);
     let alive = std::net::TcpStream::connect_timeout(
@@ -15,7 +16,43 @@ pub fn cmd_status() {
     )
     .is_ok();
 
-    println!("PID:    {}", pid);
-    println!("Port:   {}", port);
-    println!("Status: {}", if alive { "RUNNING" } else { "STOPPED" });
+    let status_line = if alive {
+        let pid_part = pid_raw.as_deref().unwrap_or("?");
+        let uptime_part = uptime_from_pid_file().unwrap_or_default();
+        format!("RUNNING  (PID {}{})", pid_part, uptime_part)
+    } else {
+        "STOPPED".to_string()
+    };
+
+    let base = format!("http://localhost:{}", port);
+    let anon_key = std::env::var("SUPARUST_ANON_KEY")
+        .unwrap_or_else(|_| "(not set — check .env)".to_string());
+    let service_key = std::env::var("SUPARUST_SERVICE_KEY")
+        .unwrap_or_else(|_| "(not set — check .env)".to_string());
+
+    println!("Status:      {}", status_line);
+    if alive {
+        println!("API URL:     {}/rest/v1", base);
+        println!("Auth URL:    {}/auth/v1", base);
+        println!("Storage URL: {}/storage/v1", base);
+        println!("Anon key:    {}", anon_key);
+        println!("Service key: {}", service_key);
+    }
+}
+
+/// Returns ", uptime Xh Ym Zs" based on .suparust.pid file mtime, or "" if unavailable.
+fn uptime_from_pid_file() -> Option<String> {
+    let meta = std::fs::metadata(".suparust.pid").ok()?;
+    let modified = meta.modified().ok()?;
+    let elapsed = modified.elapsed().ok()?;
+    let s = elapsed.as_secs();
+    let (h, m, s) = (s / 3600, (s % 3600) / 60, s % 60);
+    let uptime = if h > 0 {
+        format!("{}h {}m {}s", h, m, s)
+    } else if m > 0 {
+        format!("{}m {}s", m, s)
+    } else {
+        format!("{}s", s)
+    };
+    Some(format!(", uptime {}", uptime))
 }
