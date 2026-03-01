@@ -141,6 +141,8 @@ async fn run_rls_query(
 ) -> Result<Value, Response> {
     use crate::sql::rls::RlsContext;
     use crate::db::execute::execute_query;
+    use sea_query_binder::SqlxValues;
+    use sea_query::Value as SqValue;
 
     let rls = RlsContext {
         role: role.to_string(),
@@ -149,7 +151,31 @@ async fn run_rls_query(
         path: path.to_string(),
     };
 
-    execute_query(pool, sql, params, &rls)
+    // Convert Vec<serde_json::Value> → SqlxValues
+    let mut sea_vals: Vec<SqValue> = Vec::with_capacity(params.len());
+    for v in params {
+        let sq = match v {
+            Value::Null => SqValue::String(None),
+            Value::Bool(b) => SqValue::Bool(Some(b)),
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    SqValue::BigInt(Some(i))
+                } else if let Some(f) = n.as_f64() {
+                    SqValue::Double(Some(f))
+                } else {
+                    SqValue::String(Some(Box::new(n.to_string())))
+                }
+            }
+            Value::String(s) => SqValue::String(Some(Box::new(s))),
+            Value::Array(_) | Value::Object(_) => {
+                SqValue::String(Some(Box::new(v.to_string())))
+            }
+        };
+        sea_vals.push(sq);
+    }
+    let sqlx_values = SqlxValues(sea_query::Values(sea_vals));
+
+    execute_query(pool, sql, sqlx_values, &rls)
         .await
         .map_err(|e| {
             tracing::error!("RLS query error: {}", e);

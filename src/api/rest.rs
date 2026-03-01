@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 
 use crate::sql::rls::RlsContext;
-use crate::sql::builder::SqlBuilder;
+use crate::sql::builder::{build_select, build_insert, build_update, build_delete};
 use crate::sql::ast::{QueryAst, Operation, CountMethod};
 use crate::db::execute::execute_query;
 use crate::parser::select::parse_select;
@@ -232,7 +232,7 @@ async fn handle_select(
         count: opts.count,
     };
 
-    let (sql, params_vec) = SqlBuilder::build_select(&ast).map_err(|e| PostgRestError::from(e))?;
+    let (sql, params_vec) = build_select(&ast).map_err(|e| PostgRestError::from(e))?;
 
     let result = execute_query(&state.pool, &sql, params_vec, &rls).await.map_err(|e| PostgRestError::from(e.to_string()))?;
 
@@ -261,7 +261,7 @@ async fn handle_insert(
 
     let opts = parse_prefer(&headers);
 
-    let (sql, params_vec) = SqlBuilder::build_insert("public", &table, &body, opts.return_minimal, opts.resolution.as_ref()).map_err(|e| PostgRestError::from(e))?;
+    let (sql, params_vec) = build_insert("public", &table, &body, opts.return_minimal, opts.resolution.as_ref()).map_err(|e| PostgRestError::from(e))?;
 
     let result = execute_query(&state.pool, &sql, params_vec, &rls).await.map_err(|e| PostgRestError::from(e.to_string()))?;
 
@@ -296,7 +296,7 @@ async fn handle_update(
 
     let opts = parse_prefer(&headers);
 
-    let (sql, params_vec) = SqlBuilder::build_update("public", &table, &body, &filters, opts.return_minimal).map_err(|e| PostgRestError::from(e))?;
+    let (sql, params_vec) = build_update("public", &table, &body, &filters, opts.return_minimal).map_err(|e| PostgRestError::from(e))?;
 
     let result = execute_query(&state.pool, &sql, params_vec, &rls).await.map_err(|e| PostgRestError::from(e.to_string()))?;
 
@@ -330,7 +330,7 @@ async fn handle_delete(
 
     let opts = parse_prefer(&headers);
 
-    let (sql, params_vec) = SqlBuilder::build_delete("public", &table, &filters, opts.return_minimal).map_err(|e| PostgRestError::from(e))?;
+    let (sql, params_vec) = build_delete("public", &table, &filters, opts.return_minimal).map_err(|e| PostgRestError::from(e))?;
 
     let result = execute_query(&state.pool, &sql, params_vec, &rls).await.map_err(|e| PostgRestError::from(e.to_string()))?;
 
