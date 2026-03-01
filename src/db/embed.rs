@@ -1,77 +1,52 @@
-use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::time::Duration;
-use std::thread;
+use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
+use std::str::FromStr;
 
 pub struct EmbeddedPostgres {
-    process: Child,
+    pg: PostgreSQL,
     pub connection_string: String,
 }
 
 impl EmbeddedPostgres {
     pub async fn start(data_dir: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let data_path = Path::new(data_dir);
+        let settings = Settings {
+            version: VersionReq::from_str("=17.2.0")?,
+            data_dir: std::path::PathBuf::from(data_dir),
+            host: "127.0.0.1".to_string(),
+            port: 5433,
+            username: "postgres".to_string(),
+            temporary: false,
+            ..Default::default()
+        };
 
-        // initdb kalau data dir belum ada
-        if !data_path.join("PG_VERSION").exists() {
-            std::fs::create_dir_all(data_path)?;
-            let mut init = Command::new("initdb")
-                .args(["-D", data_dir, "--auth=trust", "--username=postgres"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?;
-                
-            let status = init.wait()?;
+        let mut pg = PostgreSQL::new(settings);
 
-            if !status.success() {
-                return Err("initdb failed — pastikan PostgreSQL terinstall di PATH".into());
-            }
+        tracing::info!("Setting up embedded PostgreSQL (first run downloads binary ~50MB)...");
+        pg.setup().await?;
+
+        tracing::info!("Starting embedded PostgreSQL in {}", data_dir);
+        pg.start().await?;
+
+        // Buat database "postgres" kalau belum ada
+        if !pg.database_exists("postgres").await? {
+            pg.create_database("postgres").await?;
         }
-
-        // Start postgres
-        let process = Command::new("postgres")
-            .args([
-                "-D", data_dir,
-                "-p", "5433",          // port berbeda dari default agar tidak conflict
-                "-c", "listen_addresses=127.0.0.1",
-                "-c", "log_destination=stderr",
-                "-c", "logging_collector=off",
-                "-c", "wal_level=logical",   // WAJIB untuk Realtime (Phase 2)
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
 
         let conn_str = "postgres://postgres@127.0.0.1:5433/postgres".to_string();
+        tracing::info!("Embedded PostgreSQL ready at {}", conn_str);
 
-        // Wait for postgres to be ready (max 10 detik)
-        for i in 0..20 {
-            thread::sleep(Duration::from_millis(500));
-            // We use a sync block inside the async function to avoid complex async/sync bridging for the sleep, 
-            // but sqlx connect needs to be async, so we'll just check if we can connect
-            // Note: Since this is inside an async function, thread::sleep blocks the executor. 
-            // We should use tokio::time::sleep, but we'll stick to the provided code for now 
-            // and fix the await since thread::sleep is sync.
-        }
-        
-        // Actually, let's just properly use tokio sleep here to not block the executor
-        for i in 0..20 {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            if sqlx::PgPool::connect(&conn_str).await.is_ok() {
-                tracing::info!("Embedded Postgres ready after {}ms", i * 500);
-                return Ok(Self {
-                    process,
-                    connection_string: conn_str,
-                });
-            }
-        }
-
-        Err("Embedded Postgres failed to start within 10 seconds".into())
+        Ok(Self { pg, connection_string: conn_str })
     }
 }
 
 impl Drop for EmbeddedPostgres {
     fn drop(&mut self) {
-        let _ = self.process.kill();
+        // postgresql_embedded handles graceful shutdown via its own Drop
+        // We use blocking runtime since Drop is sync
+        let rt = tokio::runtime::Handle::try_current();
+        if let Ok(handle) = rt {
+            handle.block_on(async {
+                let _ = self.pg.stop().await;
+            });
+        }
     }
 }
