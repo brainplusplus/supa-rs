@@ -19,11 +19,63 @@ pub async fn cmd_start_foreground() {
 }
 
 pub async fn cmd_start_daemon() {
-    todo!("daemon start")
+    // Check if already running
+    if let Ok(pid_str) = std::fs::read_to_string(PID_FILE) {
+        let pid: u32 = pid_str.trim().parse().unwrap_or(0);
+        if pid > 0 {
+            dotenvy::dotenv().ok();
+            let port = std::env::var("SUPARUST_PORT").unwrap_or_else(|_| "3000".to_string());
+            let addr = format!("127.0.0.1:{}", port);
+            let alive = std::net::TcpStream::connect_timeout(
+                &addr.parse().unwrap_or_else(|_| "127.0.0.1:3000".parse().unwrap()),
+                std::time::Duration::from_secs(1),
+            )
+            .is_ok();
+            if alive {
+                println!("Already running (PID {})", pid);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Get path to current binary
+    let exe = std::env::current_exe().expect("Cannot determine executable path");
+
+    // Spawn daemon child: same binary with --daemon-child flag
+    let child = std::process::Command::new(&exe)
+        .args(["start", "--daemon-child"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("Failed to spawn daemon child");
+
+    let child_pid = child.id();
+    std::fs::write(PID_FILE, child_pid.to_string()).expect("Failed to write PID file");
+
+    println!("Started SupaRust daemon (PID {})", child_pid);
+    println!("Logs: app.log");
 }
 
 pub async fn cmd_start_daemon_child() {
-    todo!("daemon child")
+    // Open app.log in append mode
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("app.log")
+        .expect("Cannot open app.log");
+
+    // Init tracing to write to file instead of stdout
+    tracing_subscriber::fmt()
+        .with_writer(log_file)
+        .with_ansi(false)
+        .init();
+
+    tracing::info!("SupaRust daemon child started (PID {})", std::process::id());
+
+    if let Err(e) = run_server().await {
+        tracing::error!("Server error: {}", e);
+    }
 }
 
 async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
