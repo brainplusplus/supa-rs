@@ -113,7 +113,14 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("SupaRust listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.ok();
+            tracing::info!("Ctrl+C received — shutting down gracefully...");
+        })
+        .await?;
 
+    tracing::info!("HTTP server stopped. Cleaning up...");
+    // _embedded drops here → EmbeddedPostgres::drop() calls stop_db()
     Ok(())
 }
