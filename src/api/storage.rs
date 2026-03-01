@@ -172,7 +172,7 @@ async fn create_bucket(
     let owner = claims.get("sub").and_then(|s| s.as_str()).unwrap_or("");
 
     let sql = "WITH r AS (INSERT INTO storage.buckets (id, name, owner, public) \
-         VALUES ($1, $2, $3::uuid, $4) RETURNING id, name, public) \
+         VALUES ($1, $2, NULLIF($3, '')::uuid, $4) RETURNING id, name, public) \
          SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM r";
 
     match run_rls_query(
@@ -302,7 +302,7 @@ async fn upload_object(
 
     // 1. RLS check via metadata INSERT
     let meta_sql = "WITH r AS (INSERT INTO storage.objects (bucket_id, name, owner, metadata) \
-         VALUES ($1, $2, $3::uuid, $4) \
+         VALUES ($1, $2, NULLIF($3, '')::uuid, $4) \
          ON CONFLICT (bucket_id, name) DO UPDATE \
          SET metadata = EXCLUDED.metadata, updated_at = now() \
          RETURNING id) \
