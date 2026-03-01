@@ -1,10 +1,10 @@
 use nom::{
     branch::alt,
     bytes::complete::{escaped, tag, take_while1},
-    character::complete::{char, none_of, multispace0},
-    combinator::{map, opt, recognize, value},
+    character::complete::{char, none_of},
+    combinator::{map, opt, value},
     multi::separated_list1,
-    sequence::{delimited, pair, preceded, tuple},
+    sequence::{delimited, pair, preceded},
     IResult,
 };
 

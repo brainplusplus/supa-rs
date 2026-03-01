@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::parser::filter::{Filter, ColumnFilter, FilterValue, Operator};
+use crate::parser::filter::{Filter, FilterValue, Operator};
 use crate::parser::select::SelectNode;
 use crate::parser::order::OrderNode;
 use crate::sql::ast::QueryAst;

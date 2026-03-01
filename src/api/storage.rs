@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,7 @@ pub fn router(pool: PgPool, storage_root: String, jwt_secret: String) -> Router 
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-fn extract_jwt_role(headers: &HeaderMap) -> (String, Value) {
+fn extract_jwt_role(headers: &HeaderMap, secret: &str) -> (String, Value) {
     let token_str = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -90,12 +90,11 @@ fn extract_jwt_role(headers: &HeaderMap) -> (String, Value) {
     };
 
     let mut validation = Validation::new(Algorithm::HS256);
-    validation.insecure_disable_signature_validation();
-    validation.validate_exp = false;
+        validation.validate_exp = false;
     validation.validate_nbf = false;
     validation.required_spec_claims = std::collections::HashSet::new();
 
-    match decode::<Value>(&token_str, &DecodingKey::from_secret(b""), &validation) {
+    match decode::<Value>(&token_str, &DecodingKey::from_secret(secret.as_bytes()), &validation) {
         Ok(data) => {
             let role = data.claims
                 .get("role")
@@ -169,12 +168,12 @@ async fn create_bucket(
     headers: HeaderMap,
     Json(body): Json<CreateBucketBody>,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
     let owner = claims.get("sub").and_then(|s| s.as_str()).unwrap_or("");
 
-    let sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \
-        (INSERT INTO storage.buckets (id, name, owner, public) \
-         VALUES ($1, $2, $3::uuid, $4) RETURNING id, name, public) r";
+    let sql = "WITH r AS (INSERT INTO storage.buckets (id, name, owner, public) \
+         VALUES ($1, $2, $3::uuid, $4) RETURNING id, name, public) \
+         SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM r";
 
     match run_rls_query(
         &state.pool, &role, &claims, "POST", "/storage/v1/bucket",
@@ -193,7 +192,7 @@ async fn list_buckets(
     State(state): State<StorageState>,
     headers: HeaderMap,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
     let sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \
         (SELECT id, name, public, created_at FROM storage.buckets) r";
 
@@ -211,7 +210,7 @@ async fn get_bucket(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
     let sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \
         (SELECT id, name, public, created_at FROM storage.buckets WHERE id = $1) r";
 
@@ -239,7 +238,7 @@ async fn delete_bucket(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
 
     // Check if empty first (no RLS needed for count check by owner)
     let count_sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \
@@ -284,7 +283,7 @@ async fn upload_object(
     Path((bucket, path)): Path<(String, String)>,
     body: Bytes,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
 
     // Sanitize path
     let _safe = match sanitize_path(&bucket, &path) {
@@ -302,12 +301,12 @@ async fn upload_object(
     let metadata = json!({ "mimetype": content_type, "size": size });
 
     // 1. RLS check via metadata INSERT
-    let meta_sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \
-        (INSERT INTO storage.objects (bucket_id, name, owner, metadata) \
+    let meta_sql = "WITH r AS (INSERT INTO storage.objects (bucket_id, name, owner, metadata) \
          VALUES ($1, $2, $3::uuid, $4) \
          ON CONFLICT (bucket_id, name) DO UPDATE \
          SET metadata = EXCLUDED.metadata, updated_at = now() \
-         RETURNING id) r";
+         RETURNING id) \
+         SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM r";
 
     let result = run_rls_query(
         &state.pool, &role, &claims, "POST",
@@ -351,7 +350,7 @@ async fn download_object(
     headers: HeaderMap,
     Path((bucket, path)): Path<(String, String)>,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
 
     let _safe = match sanitize_path(&bucket, &path) {
         Ok(p) => p,
@@ -453,7 +452,7 @@ async fn delete_object(
     headers: HeaderMap,
     Path((bucket, path)): Path<(String, String)>,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
 
     let _safe = match sanitize_path(&bucket, &path) {
         Ok(p) => p,
@@ -506,7 +505,7 @@ async fn create_signed_url(
     Path((bucket, path)): Path<(String, String)>,
     Json(body): Json<SignBody>,
 ) -> Response {
-    let (role, claims) = extract_jwt_role(&headers);
+    let (role, claims) = extract_jwt_role(&headers, &state.jwt_secret);
 
     // Verify object exists and user has access
     let sql = "SELECT COALESCE(json_agg(row_to_json(r)), '[]'::json) FROM \

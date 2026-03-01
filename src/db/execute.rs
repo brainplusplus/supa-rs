@@ -1,4 +1,4 @@
-use sqlx::{PgPool, Postgres, Row, types::Json};
+use sqlx::{PgPool, Row, types::Json};
 use serde_json::Value;
 use crate::sql::rls::RlsContext;
 
@@ -12,11 +12,10 @@ pub async fn execute_query(
 
     for (name, val) in rls.to_set_local_statements() {
         if name.to_lowercase() == "role" {
+            tracing::info!("SET LOCAL ROLE executing with value: '{}'", val);
             let stmt = format!("SET LOCAL ROLE {}", val);
             sqlx::query(&stmt).execute(&mut *tx).await?;
         } else {
-            // Identifier yg punya titik butuh escaped double quotes ("key")
-            // Single quotes pada string value (val) di-escape secara standar pg (ganti ' jadi '')
             let stmt = format!("SET LOCAL \"{}\" TO '{}'", name, val.replace("'", "''"));
             sqlx::query(&stmt).execute(&mut *tx).await?;
         }
@@ -34,11 +33,18 @@ pub async fn execute_query(
         q = q.bind(param_val);
     }
 
-    // Execute query and extract native JSON mapping
-    let row = q.fetch_one(&mut *tx).await?;
-    let json_result: Json<Value> = row.try_get(0)?;
+    // Gunakan fetch_optional, bukan fetch_one
+    let result = q.fetch_optional(&mut *tx).await?;
+
+    let output = match result {
+        Some(row) => {
+            let json_result: Json<Value> = row.try_get(0)?;
+            json_result.0
+        }
+        None => serde_json::json!([]),
+    };
 
     tx.commit().await?;
 
-    Ok(json_result.0)
+    Ok(output)
 }

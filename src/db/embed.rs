@@ -1,37 +1,42 @@
-use postgresql_embedded::{PostgreSQL, Settings, VersionReq};
-use std::str::FromStr;
+use pg_embed::pg_enums::PgAuthMethod;
+use pg_embed::pg_fetch::{PgFetchSettings, PG_V15};
+use pg_embed::postgres::{PgEmbed, PgSettings};
+use std::path::PathBuf;
+use std::time::Duration;
 
 pub struct EmbeddedPostgres {
-    pg: PostgreSQL,
+    pg: PgEmbed,
     pub connection_string: String,
 }
 
 impl EmbeddedPostgres {
     pub async fn start(data_dir: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let settings = Settings {
-            version: VersionReq::from_str("=17.2.0")?,
-            data_dir: std::path::PathBuf::from(data_dir),
-            host: "127.0.0.1".to_string(),
+        let pg_settings = PgSettings {
+            database_dir: PathBuf::from(data_dir),
             port: 5433,
-            username: "postgres".to_string(),
-            temporary: false,
+            user: "postgres".to_string(),
+            password: "postgres".to_string(),
+            auth_method: PgAuthMethod::Plain,
+            persistent: true,
+            timeout: Some(Duration::from_secs(30)),
+            migration_dir: None,
+        };
+
+        let fetch_settings = PgFetchSettings {
+            version: PG_V15,
             ..Default::default()
         };
 
-        let mut pg = PostgreSQL::new(settings);
-
         tracing::info!("Setting up embedded PostgreSQL (first run downloads binary ~50MB)...");
+        let mut pg = PgEmbed::new(pg_settings, fetch_settings).await?;
+
         pg.setup().await?;
 
         tracing::info!("Starting embedded PostgreSQL in {}", data_dir);
-        pg.start().await?;
+        pg.start_db().await?;
 
-        // Buat database "postgres" kalau belum ada
-        if !pg.database_exists("postgres").await? {
-            pg.create_database("postgres").await?;
-        }
-
-        let conn_str = "postgres://postgres@127.0.0.1:5433/postgres".to_string();
+        // "postgres" database is created by initdb automatically — no need to create it
+        let conn_str = pg.full_db_uri("postgres");
         tracing::info!("Embedded PostgreSQL ready at {}", conn_str);
 
         Ok(Self { pg, connection_string: conn_str })
@@ -40,12 +45,10 @@ impl EmbeddedPostgres {
 
 impl Drop for EmbeddedPostgres {
     fn drop(&mut self) {
-        // postgresql_embedded handles graceful shutdown via its own Drop
-        // We use blocking runtime since Drop is sync
         let rt = tokio::runtime::Handle::try_current();
         if let Ok(handle) = rt {
             handle.block_on(async {
-                let _ = self.pg.stop().await;
+                let _ = self.pg.stop_db().await;
             });
         }
     }

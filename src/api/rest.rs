@@ -17,18 +17,19 @@ use crate::parser::select::parse_select;
 use crate::parser::order::parse_order;
 use crate::parser::filter::parse_filter;
 
-pub fn router(pool: PgPool) -> axum::Router {
+pub fn router(pool: PgPool, jwt_secret: String) -> axum::Router {
     Router::new()
         .route("/:table", get(handle_select))
         .route("/:table", post(handle_insert))
         .route("/:table", patch(handle_update))
         .route("/:table", delete(handle_delete))
-        .with_state(AppState { pool })
+        .with_state(AppState { pool, jwt_secret })
 }
 
 #[derive(Clone)]
 struct AppState {
     pool: PgPool,
+    jwt_secret: String,
 }
 
 #[derive(serde::Serialize)]
@@ -105,7 +106,7 @@ fn parse_prefer(headers: &HeaderMap) -> PreferOptions {
     opts
 }
 
-fn extract_jwt(headers: &HeaderMap, params: &HashMap<String, String>) -> (String, Value) {
+fn extract_jwt(headers: &HeaderMap, params: &HashMap<String, String>, secret: &str) -> (String, Value) {
     let mut token_str = String::new();
 
     if let Some(auth) = headers.get("authorization") {
@@ -138,14 +139,13 @@ fn extract_jwt(headers: &HeaderMap, params: &HashMap<String, String>) -> (String
     use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 
     let mut validation = Validation::new(Algorithm::HS256);
-    validation.insecure_disable_signature_validation();
-    validation.validate_exp = false;
+        validation.validate_exp = false;
     validation.validate_nbf = false;
     validation.required_spec_claims = std::collections::HashSet::new();
 
     let decoded = decode::<serde_json::Value>(
         &token_str,
-        &DecodingKey::from_secret(b""),
+        &DecodingKey::from_secret(secret.as_bytes()),
         &validation,
     );
 
@@ -158,7 +158,10 @@ fn extract_jwt(headers: &HeaderMap, params: &HashMap<String, String>) -> (String
                 .to_string();
             (role, claims)
         }
-        Err(_) => ("anon".to_string(), json!({})),
+        Err(e) => {
+            tracing::warn!("JWT decode failed: {}", e);
+            ("anon".to_string(), json!({}))
+        }
     }
 }
 
@@ -203,7 +206,7 @@ async fn handle_select(
     headers: HeaderMap,
 ) -> Result<Response, PostgRestError> {
     let table = sanitize_table_name(&table)?;
-    let (role, jwt_claims) = extract_jwt(&headers, &params);
+    let (role, jwt_claims) = extract_jwt(&headers, &params, &state.jwt_secret);
 
     let rls = RlsContext {
         role,
@@ -245,7 +248,7 @@ async fn handle_insert(
     axum::extract::Json(body): axum::extract::Json<Value>,
 ) -> Result<Response, PostgRestError> {
     let table = sanitize_table_name(&table)?;
-    let (role, jwt_claims) = extract_jwt(&headers, &params);
+    let (role, jwt_claims) = extract_jwt(&headers, &params, &state.jwt_secret);
 
     let rls = RlsContext {
         role,
@@ -256,7 +259,7 @@ async fn handle_insert(
 
     let opts = parse_prefer(&headers);
 
-    let (mut sql, params_vec) = SqlBuilder::build_insert("public", &table, &body, opts.return_minimal, opts.resolution.as_ref()).map_err(|e| PostgRestError::from(e))?;
+    let (sql, params_vec) = SqlBuilder::build_insert("public", &table, &body, opts.return_minimal, opts.resolution.as_ref()).map_err(|e| PostgRestError::from(e))?;
 
     let result = execute_query(&state.pool, &sql, params_vec, &rls).await.map_err(|e| PostgRestError::from(e.to_string()))?;
 
@@ -275,7 +278,7 @@ async fn handle_update(
     axum::extract::Json(body): axum::extract::Json<Value>,
 ) -> Result<Response, PostgRestError> {
     let table = sanitize_table_name(&table)?;
-    let (role, jwt_claims) = extract_jwt(&headers, &params);
+    let (role, jwt_claims) = extract_jwt(&headers, &params, &state.jwt_secret);
 
     let rls = RlsContext {
         role,
@@ -309,7 +312,7 @@ async fn handle_delete(
     headers: HeaderMap,
 ) -> Result<Response, PostgRestError> {
     let table = sanitize_table_name(&table)?;
-    let (role, jwt_claims) = extract_jwt(&headers, &params);
+    let (role, jwt_claims) = extract_jwt(&headers, &params, &state.jwt_secret);
 
     let rls = RlsContext {
         role,
