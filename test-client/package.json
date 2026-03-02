@@ -4,7 +4,11 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "vitest run --reporter=verbose"
+    "test":           "vitest run --mode test --reporter=verbose",
+    "test:staging":   "vitest run --mode staging --reporter=verbose",
+    "test:ci":        "vitest run --mode ci --reporter=verbose",
+    "gen:test":       "node ../scripts/gen-env-test.mjs",
+    "gen:test:regen": "node ../scripts/gen-env-test.mjs --regen"
   },
   "keywords": [],
   "author": "",
