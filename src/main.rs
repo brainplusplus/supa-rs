@@ -13,13 +13,13 @@ use std::path::Path;
 /// Determine a stable identity string used in PID file naming.
 ///
 /// Rules:
-///   --profile test        → "test"
-///   --env-file .envgw     → "env.envgw"
-///   --env-file prod.env   → "env.prod_env"
-///   (no flags)            → "local"
+///   --profile test        → "profile.test"   → .suparust.profile.test.<port>.pid
+///   --env-file .envgw     → "env.envgw"      → .suparust.env.envgw.<port>.pid
+///   --env-file prod.env   → "env.prod_env"   → .suparust.env.prod_env.<port>.pid
+///   (no flags)            → ""               → .suparust.pid
 pub fn derive_pid_identity(profile: Option<&str>, env_file: Option<&Path>) -> String {
     match (profile, env_file) {
-        (Some(p), _) => p.to_string(),
+        (Some(p), _) => format!("profile.{}", p),
         (None, Some(path)) => {
             let filename = path
                 .file_name()
@@ -33,7 +33,7 @@ pub fn derive_pid_identity(profile: Option<&str>, env_file: Option<&Path>) -> St
                 .collect();
             format!("env.{}", normalized)
         }
-        (None, None) => "local".to_string(),
+        (None, None) => String::new(), // default → .suparust.pid (no identity segment)
     }
 }
 
