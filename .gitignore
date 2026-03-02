@@ -7,6 +7,13 @@ null
 patch.js
 .suparust.pid
 .env
+.env.local
+.env.*.local
+suparust/.env.test
+test-client/.env.test
 node_modules
-.claude
 .cursor
+.claude
+
+CLAUDE.md
+GEMINI.md
