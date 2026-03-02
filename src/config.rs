@@ -169,15 +169,9 @@ impl Config {
         let env_name = env_any(&["SUPARUST_ENV"])
             .unwrap_or_else(|| "local".to_string());
         let pid_identity = std::env::var("SUPARUST_PID_IDENTITY")
-            .unwrap_or_default();
+            .unwrap_or_else(|_| "local".to_string());
         let pid_file = env_any(&["SUPARUST_PID_FILE"])
-            .unwrap_or_else(|| {
-                if pid_identity.is_empty() {
-                    ".suparust.pid".to_string()
-                } else {
-                    format!(".suparust.{}.{}.pid", pid_identity, port)
-                }
-            });
+            .unwrap_or_else(|| format!(".suparust.{}.{}.pid", pid_identity, port));
 
         // ── DB password — auto-generate if absent ────────────────────────────
         let db_password = env_any(&["SUPARUST_DB_PASSWORD", "POSTGRES_PASSWORD"])

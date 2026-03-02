@@ -33,7 +33,7 @@ pub fn derive_pid_identity(profile: Option<&str>, env_file: Option<&Path>) -> St
                 .collect();
             format!("env.{}", normalized)
         }
-        (None, None) => String::new(), // default → .suparust.pid (no identity segment)
+        (None, None) => "local".to_string(),
     }
 }
 
