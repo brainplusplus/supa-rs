@@ -24,13 +24,19 @@ let serverProcess = null
 // ── HTTP health check: retry until /auth/v1/health returns 200 ─────────────
 // Using /auth/v1/health (not plain TCP) ensures DB + migrations are ready,
 // not just that the port is open.
-async function waitForServer(baseUrl, timeout = 90_000) {
+async function waitForServer(baseUrl, timeout = 300_000) {
   const start = Date.now()
+  let warned = false
   while (Date.now() - start < timeout) {
     try {
       const res = await fetch(`${baseUrl}/auth/v1/health`)
       if (res.ok) return
     } catch {}
+    // Warn after 30s — likely a first-run pg-embed download (~50MB)
+    if (!warned && Date.now() - start > 30_000) {
+      console.log('[globalSetup] Still waiting... first run downloads pg-embed binary (~50MB), this may take a few minutes.')
+      warned = true
+    }
     await new Promise(r => setTimeout(r, 500))
   }
   throw new Error(`[globalSetup] Server did not start within ${timeout}ms at ${baseUrl}`)
@@ -54,17 +60,26 @@ export async function setup() {
 
   // Inject test env vars into child process — these win over .env
   // because dotenvy skips vars already present in process env.
-  serverProcess = spawn('cargo', ['run'], {
+  serverProcess = spawn('cargo', ['run', '--', 'start'], {
     cwd: ROOT,
     env: { ...process.env, ...serverEnv },  // root .env.test: SUPARUST_PORT, SUPARUST_DB_DATA_DIR, etc.
     shell: true,
-    stdio: ['ignore', 'ignore', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],  // pipe both stdout+stderr — TracingWriter::Stdout uses stdout
   })
 
+  // Server logs go to stdout (TracingWriter::Stdout)
+  serverProcess.stdout.on('data', d => {
+    const line = d.toString().trim()
+    if (line.includes('Listening') || line.includes('WARN') || line.includes('ERROR') || line.includes('error')) {
+      console.log(`[server] ${line}`)
+    }
+  })
+
+  // Cargo build output goes to stderr
   serverProcess.stderr.on('data', d => {
     const line = d.toString().trim()
-    if (line.includes('Listening') || line.includes('error[') || line.includes('WARN') || line.includes('ERROR')) {
-      console.log(`[server] ${line}`)
+    if (line.includes('error[')) {
+      console.log(`[cargo] ${line}`)
     }
   })
 
