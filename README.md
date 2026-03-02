@@ -176,19 +176,51 @@ RUST_LOG=suparust=debug,sqlx=debug suparust start
 
 ## 🧪 Integration Tests
 
-21 Vitest tests covering Auth, REST API, Storage, and RLS:
+21 Vitest tests covering Auth, REST API, Storage, and RLS — server starts and stops automatically.
+
+### Prerequisites
+
+- Rust toolchain (`cargo`)
+- Node.js 18+
+
+### First-Time Setup
+
+Generate isolated test environment (separate port + database):
 
 ```bash
-suparust start          # Start the server first
-
-cd test-client
-npm install
-npx vitest run --reporter=verbose
+node scripts/gen-env-test.mjs
 ```
+
+This creates:
+- `.env.test` — server config (port 53001, isolated pg-embed at `data/pg-test/`)
+- `test-client/.env.test` — client config with matching JWT keys
+
+### Run Tests
+
+```bash
+cd test-client && npm test
+```
+
+Server starts automatically, all 21 tests run, server stops on completion.
+
+> **First run:** pg-embed downloads its binary (~50MB). This takes 2–5 minutes.
+> Subsequent runs start in seconds.
 
 ```
 Tests  21 passed (21)
 ```
+
+### Reset Test Environment
+
+```bash
+# Regenerate JWT secret + wipe test database
+node scripts/gen-env-test.mjs --regen
+```
+
+Use `--regen` when:
+- Auth tests fail unexpectedly (JWT secret drift)
+- Test database is in a bad state
+- Switching branches with schema changes
 
 ---
 

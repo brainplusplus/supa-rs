@@ -30,12 +30,22 @@ const TEST_PASS  = 'Password123!'
 const isRegen = process.argv.includes('--regen')
 
 // ── Step 1: Wipe test data dirs if --regen ─────────────────────────────────
+// Preserves pg-embed binary cache (extracted/) — only wipe PostgreSQL cluster files.
+// Binary cache is ~50MB and takes minutes to download; no need to re-download on regen.
 if (isRegen) {
-  for (const dir of [PG_TEST_DIR, STORAGE_TEST_DIR]) {
-    if (fs.existsSync(dir)) {
-      fs.rmSync(dir, { recursive: true, force: true })
-      console.log(`[gen-env-test] Deleted ${dir}`)
+  // Storage test dir — wipe entirely (just user files, no binaries)
+  if (fs.existsSync(STORAGE_TEST_DIR)) {
+    fs.rmSync(STORAGE_TEST_DIR, { recursive: true, force: true })
+    console.log(`[gen-env-test] Deleted ${STORAGE_TEST_DIR}`)
+  }
+
+  // pg-test dir — wipe cluster data but preserve binary cache
+  if (fs.existsSync(PG_TEST_DIR)) {
+    for (const entry of fs.readdirSync(PG_TEST_DIR)) {
+      if (entry === 'extracted') continue  // preserve pg-embed binary cache (~50MB)
+      fs.rmSync(path.join(PG_TEST_DIR, entry), { recursive: true, force: true })
     }
+    console.log(`[gen-env-test] Wiped pg-test cluster data (preserved extracted/ binary cache)`)
   }
 }
 
