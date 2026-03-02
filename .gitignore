@@ -5,7 +5,7 @@ app.log
 nul
 null
 patch.js
-.suparust.pid
+.suparust.*.pid
 .env
 .env.local
 .env.*.local
