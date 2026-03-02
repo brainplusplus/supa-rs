@@ -117,8 +117,6 @@ fn env_bool(keys: &[&str], default: bool) -> bool {
 
 impl Config {
     pub fn from_env() -> Self {
-        dotenvy::dotenv().ok();
-
         // ── JWT secret (must resolve first — keys are derived from it) ──────
         let jwt_secret_opt = env_any(&["SUPARUST_JWT_SECRET", "JWT_SECRET"]);
         let jwt_secret = match jwt_secret_opt {
@@ -128,9 +126,6 @@ impl Config {
                 load_or_generate_env()
             }
         };
-
-        // Reload .env in case it was just written
-        dotenvy::dotenv().ok();
 
         // ── Validate log_format early ────────────────────────────────────────
         let log_format = env_any(&["SUPARUST_LOG_FORMAT"])
@@ -173,8 +168,10 @@ impl Config {
         // ── Runtime metadata ─────────────────────────────────────────────────
         let env_name = env_any(&["SUPARUST_ENV"])
             .unwrap_or_else(|| "local".to_string());
+        let pid_identity = std::env::var("SUPARUST_PID_IDENTITY")
+            .unwrap_or_else(|_| "local".to_string());
         let pid_file = env_any(&["SUPARUST_PID_FILE"])
-            .unwrap_or_else(|| format!(".suparust.{}.{}.pid", env_name, port));
+            .unwrap_or_else(|| format!(".suparust.{}.{}.pid", pid_identity, port));
 
         // ── DB password — auto-generate if absent ────────────────────────────
         let db_password = env_any(&["SUPARUST_DB_PASSWORD", "POSTGRES_PASSWORD"])
