@@ -7,7 +7,6 @@
  */
 import { spawn }   from 'child_process'
 import { loadEnv } from 'vite'
-import net         from 'net'
 import path        from 'path'
 
 const mode = process.env.__TEST_MODE ?? 'test'
@@ -17,39 +16,25 @@ const BASE        = env.SUPABASE_URL
 const SERVICE_KEY = env.SUPABASE_SERVICE_KEY
 const TEST_EMAIL  = env.TEST_EMAIL
 const TEST_PASS   = env.TEST_PASSWORD
-const PORT        = parseInt(env.SUPABASE_URL?.split(':').pop() ?? '53001', 10)
 
 // Repo root is one level up from test-client/
 const ROOT = path.resolve(process.cwd(), '..')
 
 let serverProcess = null
 
-// ── TCP health check: retry until port accepts connections ─────────────────
-function waitForPort(port, timeout = 90_000) {
-  return new Promise((resolve, reject) => {
-    const start = Date.now()
-    function attempt() {
-      const sock = new net.Socket()
-      sock.setTimeout(500)
-      sock.connect(port, '127.0.0.1', () => {
-        sock.destroy()
-        resolve()
-      })
-      sock.on('error', () => {
-        sock.destroy()
-        if (Date.now() - start > timeout) {
-          reject(new Error(`[globalSetup] Server did not start within ${timeout}ms on port ${port}`))
-        } else {
-          setTimeout(attempt, 500)
-        }
-      })
-      sock.on('timeout', () => {
-        sock.destroy()
-        setTimeout(attempt, 500)
-      })
-    }
-    attempt()
-  })
+// ── HTTP health check: retry until /auth/v1/health returns 200 ─────────────
+// Using /auth/v1/health (not plain TCP) ensures DB + migrations are ready,
+// not just that the port is open.
+async function waitForServer(baseUrl, timeout = 90_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeout) {
+    try {
+      const res = await fetch(`${baseUrl}/auth/v1/health`)
+      if (res.ok) return
+    } catch {}
+    await new Promise(r => setTimeout(r, 500))
+  }
+  throw new Error(`[globalSetup] Server did not start within ${timeout}ms at ${baseUrl}`)
 }
 
 async function apiPost(path, body, token = SERVICE_KEY) {
@@ -89,8 +74,8 @@ export async function setup() {
     }
   })
 
-  console.log(`[globalSetup] Waiting for server on port ${PORT}...`)
-  await waitForPort(PORT)
+  console.log(`[globalSetup] Waiting for server at ${BASE}...`)
+  await waitForServer(BASE)
   console.log(`[globalSetup] Server ready at ${BASE}`)
 
   // Seed: create test user + avatars bucket

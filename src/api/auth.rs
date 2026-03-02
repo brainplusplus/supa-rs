@@ -623,9 +623,17 @@ async fn update_user(
     .into_response()
 }
 
+async fn health() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION")
+    }))
+}
+
 pub fn router(pool: PgPool, jwt_secret: String) -> Router {
     let state = AuthState { pool, jwt_secret };
     Router::new()
+        .route("/health", get(health))
         .route("/token", post(create_token))
         .route("/signup", post(signup))
         .route("/logout", post(logout))
