@@ -25,7 +25,9 @@ pub fn derive_pid_identity(profile: Option<&str>, env_file: Option<&Path>) -> St
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.to_string_lossy().into_owned());
-            let normalized: String = filename
+            // Strip leading dots (e.g. ".envgw" → "envgw", ".env.test" → "env.test")
+            let stripped = filename.trim_start_matches('.');
+            let normalized: String = stripped
                 .chars()
                 .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
                 .collect();
