@@ -13,6 +13,8 @@ pub struct Config {
     pub storage_root: String,
     pub anon_key: String,
     pub service_key: String,
+    pub log_level: String,   // SUPARUST_LOG_LEVEL
+    pub log_format: String,  // SUPARUST_LOG_FORMAT
 }
 
 impl Config {
@@ -62,6 +64,10 @@ impl Config {
                 .unwrap_or_else(|_| "./data/storage".to_string()),
             anon_key,
             service_key,
+            log_level: env::var("SUPARUST_LOG_LEVEL")
+                .unwrap_or_else(|_| "info".to_string()),
+            log_format: env::var("SUPARUST_LOG_FORMAT")
+                .unwrap_or_else(|_| "pretty".to_string()),
         }
     }
 }
@@ -92,6 +98,8 @@ fn load_or_generate_env() -> String {
             SUPARUST_PORT=3000\n\
             SUPARUST_DB_DATA_DIR=./data/postgres\n\
             SUPARUST_STORAGE_ROOT=./data/storage\n\
+            SUPARUST_LOG_LEVEL=info\n\
+            SUPARUST_LOG_FORMAT=pretty\n\
             {env_content}"
         );
         let _ = fs::write(ENV_FILE, full_content);
