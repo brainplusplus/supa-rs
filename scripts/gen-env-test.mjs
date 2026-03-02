@@ -2,29 +2,47 @@
 /**
  * gen-env-test.mjs
  *
- * Generates suparust/.env.test and test-client/.env.test from a single
- * randomly-generated JWT secret. Both files are gitignored — this script
- * is the single source of truth for test credentials.
+ * Generates two pairs of env files from a single randomly-generated JWT secret:
+ *
+ *   Pair A — SUPARUST_* style (port 53001, pg-test / storage-test):
+ *     .env.test               → suparust server config
+ *     test-client/.env.test   → vitest client config
+ *
+ *   Pair B — Supabase alias style (port 53002, pg-compat / storage-compat):
+ *     .env.supabase.test               → suparust server config (compat layer test)
+ *     test-client/.env.supabase.test   → vitest client config
+ *
+ * Both pairs share the same JWT secret so token signing is consistent.
+ * All four files are gitignored — this script is the single source of truth.
  *
  * Usage:
- *   node scripts/gen-env-test.mjs           # generate (preserve pg-test)
- *   node scripts/gen-env-test.mjs --regen   # generate + wipe data/pg-test + data/storage-test
+ *   node scripts/gen-env-test.mjs           # generate (preserve pg dirs)
+ *   node scripts/gen-env-test.mjs --regen   # generate + wipe all test data dirs
  */
 import crypto from 'crypto'
 import fs     from 'fs'
 import path   from 'path'
 
 // ── Paths ──────────────────────────────────────────────────────────────────
-const ROOT              = path.resolve(import.meta.dirname, '..')
-const PG_TEST_DIR       = path.join(ROOT, 'data', 'pg-test')
-const STORAGE_TEST_DIR  = path.join(ROOT, 'data', 'storage-test')
-const SERVER_ENV        = path.join(ROOT, '.env.test')            // Rust root
-const CLIENT_ENV        = path.join(ROOT, 'test-client', '.env.test')
+const ROOT = path.resolve(import.meta.dirname, '..')
+
+// Pair A — SUPARUST_* style
+const PG_TEST_DIR      = path.join(ROOT, 'data', 'pg-test')
+const STORAGE_TEST_DIR = path.join(ROOT, 'data', 'storage-test')
+const SERVER_ENV       = path.join(ROOT, '.env.test')
+const CLIENT_ENV       = path.join(ROOT, 'test-client', '.env.test')
+
+// Pair B — Supabase compat style
+const PG_COMPAT_DIR      = path.join(ROOT, 'data', 'pg-compat')
+const STORAGE_COMPAT_DIR = path.join(ROOT, 'data', 'storage-compat')
+const SERVER_COMPAT_ENV  = path.join(ROOT, '.env.supabase.test')
+const CLIENT_COMPAT_ENV  = path.join(ROOT, 'test-client', '.env.supabase.test')
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const TEST_PORT  = 53001
-const TEST_EMAIL = 'test@suparust.dev'
-const TEST_PASS  = 'Password123!'
+const TEST_PORT   = 53001
+const COMPAT_PORT = 53002
+const TEST_EMAIL  = 'test@suparust.dev'
+const TEST_PASS   = 'Password123!'
 
 // ── Flags ──────────────────────────────────────────────────────────────────
 const isRegen = process.argv.includes('--regen')
@@ -32,24 +50,29 @@ const isRegen = process.argv.includes('--regen')
 // ── Step 1: Wipe test data dirs if --regen ─────────────────────────────────
 // Preserves pg-embed binary cache (extracted/) — only wipe PostgreSQL cluster files.
 // Binary cache is ~50MB and takes minutes to download; no need to re-download on regen.
-if (isRegen) {
-  // Storage test dir — wipe entirely (just user files, no binaries)
-  if (fs.existsSync(STORAGE_TEST_DIR)) {
-    fs.rmSync(STORAGE_TEST_DIR, { recursive: true, force: true })
-    console.log(`[gen-env-test] Deleted ${STORAGE_TEST_DIR}`)
+function wipePgDir(dir, label) {
+  if (!fs.existsSync(dir)) return
+  for (const entry of fs.readdirSync(dir)) {
+    if (entry === 'extracted') continue // preserve pg-embed binary cache (~50MB)
+    fs.rmSync(path.join(dir, entry), { recursive: true, force: true })
   }
-
-  // pg-test dir — wipe cluster data but preserve binary cache
-  if (fs.existsSync(PG_TEST_DIR)) {
-    for (const entry of fs.readdirSync(PG_TEST_DIR)) {
-      if (entry === 'extracted') continue  // preserve pg-embed binary cache (~50MB)
-      fs.rmSync(path.join(PG_TEST_DIR, entry), { recursive: true, force: true })
-    }
-    console.log(`[gen-env-test] Wiped pg-test cluster data (preserved extracted/ binary cache)`)
-  }
+  console.log(`[gen-env-test] Wiped ${label} cluster data (preserved extracted/ binary cache)`)
 }
 
-// ── Step 2: Generate JWT secret ────────────────────────────────────────────
+function wipeStorageDir(dir, label) {
+  if (!fs.existsSync(dir)) return
+  fs.rmSync(dir, { recursive: true, force: true })
+  console.log(`[gen-env-test] Deleted ${label}`)
+}
+
+if (isRegen) {
+  wipePgDir(PG_TEST_DIR, 'pg-test')
+  wipeStorageDir(STORAGE_TEST_DIR, 'storage-test')
+  wipePgDir(PG_COMPAT_DIR, 'pg-compat')
+  wipeStorageDir(STORAGE_COMPAT_DIR, 'storage-compat')
+}
+
+// ── Step 2: Generate JWT secret (shared by both pairs) ─────────────────────
 const JWT_SECRET = crypto.randomBytes(32).toString('hex')
 const iat = Math.floor(Date.now() / 1000)
 const exp = iat + 10 * 365 * 24 * 3600  // 10 years — matches config.rs generate_jwt
@@ -73,7 +96,7 @@ function signJWT(role) {
 const ANON_KEY    = signJWT('anon')
 const SERVICE_KEY = signJWT('service_role')
 
-// ── Step 3: Write suparust/.env.test ──────────────────────────────────────
+// ── Step 3: Write Pair A — SUPARUST_* style ────────────────────────────────
 const serverEnv = `# Auto-generated by scripts/gen-env-test.mjs — DO NOT EDIT manually
 # Regenerate with: node scripts/gen-env-test.mjs [--regen]
 SUPARUST_PORT=${TEST_PORT}
@@ -89,7 +112,6 @@ SUPARUST_LOG_FORMAT=pretty
 fs.writeFileSync(SERVER_ENV, serverEnv, 'utf8')
 console.log(`[gen-env-test] Written ${SERVER_ENV}`)
 
-// ── Step 4: Write test-client/.env.test ───────────────────────────────────
 const clientEnv = `# Auto-generated by scripts/gen-env-test.mjs — DO NOT EDIT manually
 # Regenerate with: node scripts/gen-env-test.mjs [--regen]
 SUPABASE_URL=http://127.0.0.1:${TEST_PORT}
@@ -101,12 +123,45 @@ TEST_PASSWORD=${TEST_PASS}
 fs.writeFileSync(CLIENT_ENV, clientEnv, 'utf8')
 console.log(`[gen-env-test] Written ${CLIENT_ENV}`)
 
+// ── Step 4: Write Pair B — Supabase alias style ────────────────────────────
+const serverCompatEnv = `# Auto-generated by scripts/gen-env-test.mjs — DO NOT EDIT manually
+# Supabase-compatible alias style — tests SupaRust env compat layer end-to-end.
+# Regenerate with: node scripts/gen-env-test.mjs [--regen]
+PORT=${COMPAT_PORT}
+JWT_SECRET=${JWT_SECRET}
+ANON_KEY=${ANON_KEY}
+SERVICE_ROLE_KEY=${SERVICE_KEY}
+DATA_DIR=./data/pg-compat
+STORAGE_ROOT=./data/storage-compat
+`
+fs.writeFileSync(SERVER_COMPAT_ENV, serverCompatEnv, 'utf8')
+console.log(`[gen-env-test] Written ${SERVER_COMPAT_ENV}`)
+
+const clientCompatEnv = `# Auto-generated by scripts/gen-env-test.mjs — DO NOT EDIT manually
+# Supabase-compatible alias style — tests SupaRust env compat layer end-to-end.
+# Regenerate with: node scripts/gen-env-test.mjs [--regen]
+SUPABASE_URL=http://127.0.0.1:${COMPAT_PORT}
+SUPABASE_ANON_KEY=${ANON_KEY}
+SUPABASE_SERVICE_KEY=${SERVICE_KEY}
+TEST_EMAIL=${TEST_EMAIL}
+TEST_PASSWORD=${TEST_PASS}
+`
+fs.writeFileSync(CLIENT_COMPAT_ENV, clientCompatEnv, 'utf8')
+console.log(`[gen-env-test] Written ${CLIENT_COMPAT_ENV}`)
+
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log(`
 [gen-env-test] Done!
-  Port       : ${TEST_PORT}
-  PG dir     : ${PG_TEST_DIR}
-  Storage    : ${STORAGE_TEST_DIR}
-  JWT Secret : ${JWT_SECRET.slice(0, 8)}...
+  Pair A (SUPARUST_* style):
+    Port    : ${TEST_PORT}
+    PG dir  : ${PG_TEST_DIR}
+    Storage : ${STORAGE_TEST_DIR}
+
+  Pair B (Supabase compat style):
+    Port    : ${COMPAT_PORT}
+    PG dir  : ${PG_COMPAT_DIR}
+    Storage : ${STORAGE_COMPAT_DIR}
+
+  JWT Secret : ${JWT_SECRET.slice(0, 8)}...  (shared)
   Regen mode : ${isRegen}
 `)
