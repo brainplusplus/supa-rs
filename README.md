@@ -51,7 +51,13 @@ suparust start
 suparust start --daemon
 ```
 
-On first run, SupaRust auto-generates a JWT secret and writes it to `.env`:
+> **First run — do not interrupt.** SupaRust downloads the embedded PostgreSQL binary (~50 MB) and initializes the database cluster. This takes **2–5 minutes** depending on network speed. You will see:
+> ```
+> Setting up embedded PostgreSQL (first run downloads binary ~50MB)...
+> ```
+> Once ready, the log shows `Listening on 0.0.0.0:3000`. Subsequent runs start in seconds with no download.
+
+On first run, SupaRust also auto-generates a JWT secret and writes it to `.env`:
 
 ```
 SUPARUST_JWT_SECRET=...
@@ -246,7 +252,7 @@ Tests  21 passed (21)
 ### Reset Test Environment
 
 ```bash
-# Regenerate JWT secret + wipe test database
+# Regenerate JWT secret + wipe test database + wipe pg-embed system cache
 node scripts/gen-env-test.mjs --regen
 ```
 
@@ -254,6 +260,7 @@ Use `--regen` when:
 - Auth tests fail unexpectedly (JWT secret drift)
 - Test database is in a bad state
 - Switching branches with schema changes
+- pg-embed fails with `Failed to unpack PostgreSQL binaries` (corrupt cache)
 
 ---
 
