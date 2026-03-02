@@ -1,19 +1,20 @@
-const PID_FILE: &str = ".suparust.pid";
-
 pub fn cmd_stop() {
-    match std::fs::read_to_string(PID_FILE) {
+    let cfg = crate::config::Config::from_env();
+    let pid_file = &cfg.pid_file;
+
+    match std::fs::read_to_string(pid_file) {
         Ok(pid_str) => {
             let pid: u32 = match pid_str.trim().parse() {
                 Ok(p) if p > 0 => p,
                 _ => {
-                    println!("Invalid PID in {} — deleting", PID_FILE);
-                    std::fs::remove_file(PID_FILE).ok();
+                    println!("Invalid PID in {} — deleting", pid_file);
+                    std::fs::remove_file(pid_file).ok();
                     return;
                 }
             };
 
             let was_running = kill_pid(pid);
-            std::fs::remove_file(PID_FILE).ok();
+            std::fs::remove_file(pid_file).ok();
 
             if was_running {
                 println!("SupaRust stopped (PID {})", pid);
@@ -23,23 +24,18 @@ pub fn cmd_stop() {
         }
         Err(_) => {
             // No PID file — try to find the process by port
-            dotenvy::dotenv().ok();
-            let port = std::env::var("SUPARUST_PORT")
-                .or_else(|_| std::env::var("PORT"))
-                .unwrap_or_else(|_| "3000".to_string());
+            println!("No {} found — searching for process on port {}...", pid_file, cfg.port);
 
-            println!("No {} found — searching for process on port {}...", PID_FILE, port);
-
-            match find_pid_on_port(&port) {
+            match find_pid_on_port(&cfg.port.to_string()) {
                 Some(pid) => {
                     if kill_pid(pid) {
-                        println!("SupaRust stopped (PID {} found via port {})", pid, port);
+                        println!("SupaRust stopped (PID {} found via port {})", pid, cfg.port);
                     } else {
                         println!("Process {} was not running", pid);
                     }
                 }
                 None => {
-                    println!("No process found on port {} — server is not running", port);
+                    println!("No process found on port {} — server is not running", cfg.port);
                 }
             }
         }
