@@ -5,7 +5,8 @@ use axum::Router;
 const PID_FILE: &str = ".suparust.pid";
 
 pub async fn cmd_start_foreground() {
-    tracing_subscriber::fmt::init();
+    let cfg = crate::config::Config::from_env();
+    crate::tracing::init_tracing(&cfg.log_level, &cfg.log_format, crate::tracing::TracingWriter::Stdout);
 
     let pid = std::process::id();
     std::fs::write(PID_FILE, pid.to_string()).ok();
@@ -70,18 +71,14 @@ pub async fn cmd_start_daemon() {
 }
 
 pub async fn cmd_start_daemon_child() {
-    // Open app.log in append mode
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open("app.log")
         .expect("Cannot open app.log");
 
-    // Init tracing to write to file instead of stdout
-    tracing_subscriber::fmt()
-        .with_writer(log_file)
-        .with_ansi(false)
-        .init();
+    let cfg = crate::config::Config::from_env();
+    crate::tracing::init_tracing(&cfg.log_level, &cfg.log_format, crate::tracing::TracingWriter::File(log_file));
 
     tracing::info!("SupaRust daemon child started (PID {})", std::process::id());
 
