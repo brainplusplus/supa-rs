@@ -19,7 +19,7 @@ pub async fn cmd_start_foreground() {
         if msg.contains("10048") || msg.contains("address in use") || msg.contains("Address already in use") {
             tracing::error!(
                 "Port {} is already in use. Run `suparust stop` to kill the existing process.",
-                cfg.port
+                cfg.server.port
             );
         } else {
             tracing::error!("Server error: {}", e);
@@ -36,7 +36,7 @@ pub async fn cmd_start_daemon() {
     if let Ok(pid_str) = std::fs::read_to_string(&cfg.pid_file) {
         let pid: u32 = pid_str.trim().parse().unwrap_or(0);
         if pid > 0 {
-            let addr = format!("127.0.0.1:{}", cfg.port);
+            let addr = format!("127.0.0.1:{}", cfg.server.port);
             let alive = std::net::TcpStream::connect_timeout(
                 &addr.parse().unwrap_or_else(|_| "127.0.0.1:3000".parse().unwrap()),
                 std::time::Duration::from_secs(1),
@@ -88,14 +88,14 @@ pub async fn cmd_start_daemon_child() {
 async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = Config::from_env();
 
-    let (conn_str, _embedded) = match cfg.database_url {
+    let (conn_str, _embedded) = match cfg.database.url {
         Some(url) => {
             tracing::info!("Using external PostgreSQL: {}", url);
             (url.clone(), None)
         }
         None => {
-            tracing::info!("Starting embedded PostgreSQL in {}", cfg.data_dir);
-            let embedded = EmbeddedPostgres::start(&cfg.data_dir).await?;
+            tracing::info!("Starting embedded PostgreSQL in {}", cfg.database.data_dir);
+            let embedded = EmbeddedPostgres::start(&cfg.database.data_dir).await?;
             let cs = embedded.connection_string.clone();
             (cs, Some(embedded))
         }
@@ -108,12 +108,12 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Migrations complete");
 
     let app = Router::new()
-        .nest("/rest/v1",    crate::api::rest::router(pool.clone(), cfg.jwt_secret.clone()))
-        .nest("/auth/v1",    crate::api::auth::router(pool.clone(), cfg.jwt_secret.clone()))
+        .nest("/rest/v1",    crate::api::rest::router(pool.clone(), cfg.jwt.secret.clone()))
+        .nest("/auth/v1",    crate::api::auth::router(pool.clone(), cfg.jwt.secret.clone()))
         .nest("/storage/v1", crate::api::storage::router(
             pool.clone(),
             cfg.storage_root.clone(),
-            cfg.jwt_secret.clone(),
+            cfg.jwt.secret.clone(),
         ))
         .layer(
             ServiceBuilder::new()
@@ -137,7 +137,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                 ),
         );
 
-    let addr = format!("0.0.0.0:{}", cfg.port);
+    let addr = format!("0.0.0.0:{}", cfg.server.port);
     tracing::info!("SupaRust listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;
