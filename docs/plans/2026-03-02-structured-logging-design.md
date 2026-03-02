@@ -49,12 +49,18 @@ Also added to `load_or_generate_env()` auto-generated `.env` block.
 
 ### Tracing init (`src/tracing.rs`)
 
-New file. Single public function:
+New file. Uses `TracingWriter` enum instead of generic `MakeWriter` — avoids type complexity from `fmt()` builder type changing between json/pretty branches:
 
 ```rust
-pub fn init_tracing<W>(log_level: &str, log_format: &str, writer: W, ansi: bool)
-where W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static
+pub enum TracingWriter {
+    Stdout,
+    File(std::fs::File),
+}
+
+pub fn init_tracing(log_level: &str, log_format: &str, writer: TracingWriter)
 ```
+
+Four match arms cover `(format, writer)` combinations — each arm fully constructs its own subscriber chain without shared generic state.
 
 Filter logic:
 - Respects `RUST_LOG` if set (via `EnvFilter::try_from_default_env()`)
