@@ -5,7 +5,7 @@
  * Reads config from .env.test via loadEnv (same source as vitest.config.js).
  * Mode is bridged from vitest.config.js via process.env.__TEST_MODE.
  */
-import { spawn }   from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { loadEnv } from 'vite'
 import path        from 'path'
 
@@ -112,15 +112,20 @@ export async function setup() {
 export async function teardown() {
   if (serverProcess) {
     console.log('[globalSetup] Stopping test server...')
-    // Use suparust stop --profile <mode> to cleanly remove PID file
-    const { spawnSync } = await import('child_process')
-    spawnSync('cargo', ['run', '--', '--profile', mode, 'stop'], {
+    // Use suparust stop --profile <mode> to cleanly remove PID file + graceful shutdown
+    const result = spawnSync('cargo', ['run', '--', '--profile', mode, 'stop'], {
       cwd: ROOT,
       env: process.env,
       shell: true,
       stdio: 'inherit',
+      timeout: 120_000,  // 120s — allows cargo compile on first run
     })
-    await new Promise(r => setTimeout(r, 1000))
+    if (result.error || result.status !== 0) {
+      // stop command failed — kill the process directly as fallback
+      console.warn(`[globalSetup] suparust stop failed (status=${result.status}) — killing directly`)
+      serverProcess.kill('SIGTERM')
+      await new Promise(r => setTimeout(r, 2000))
+    }
     console.log('[globalSetup] Server stopped.')
   }
 }
