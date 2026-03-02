@@ -9,7 +9,7 @@ patch.js
 .env
 .env.local
 .env.*.local
-suparust/.env.test
+.env.test
 test-client/.env.test
 node_modules
 .cursor
