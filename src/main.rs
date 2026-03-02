@@ -4,6 +4,7 @@ pub mod db;
 pub mod parser;
 pub mod sql;
 pub mod cli;
+pub mod tracing;
 
 use clap::Parser;
 use cli::{Cli, Command};
