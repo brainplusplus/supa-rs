@@ -22,7 +22,7 @@ const SERVER_ENV        = path.join(ROOT, '.env.test')            // Rust root
 const CLIENT_ENV        = path.join(ROOT, 'test-client', '.env.test')
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const TEST_PORT  = 3001
+const TEST_PORT  = 53001
 const TEST_EMAIL = 'test@suparust.dev'
 const TEST_PASS  = 'Password123!'
 
