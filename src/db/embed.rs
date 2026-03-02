@@ -18,7 +18,7 @@ impl EmbeddedPostgres {
             password: "postgres".to_string(),
             auth_method: PgAuthMethod::Plain,
             persistent: true,
-            timeout: Some(Duration::from_secs(30)),
+            timeout: Some(Duration::from_secs(300)), // 300s — allows first-run binary download (~50MB)
             migration_dir: None,
         };
 
