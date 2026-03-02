@@ -3,9 +3,19 @@ pub mod stop;
 pub mod status;
 pub mod logs;
 
+use std::path::PathBuf;
+
 #[derive(clap::Parser)]
 #[command(name = "suparust", about = "SupaRust — Supabase-compatible backend")]
 pub struct Cli {
+    /// Load environment from .env.<profile> (e.g. --profile test loads .env.test)
+    #[arg(long, global = true)]
+    pub profile: Option<String>,
+
+    /// Load environment from a specific file path (advanced; cannot combine with --profile)
+    #[arg(long = "env-file", global = true)]
+    pub env_file: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
