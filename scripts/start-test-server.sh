@@ -18,21 +18,33 @@ ROOT="$(dirname "$SCRIPT_DIR")"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 PROFILE=""
-if [[ "${1:-}" == "--profile" && -n "${2:-}" ]]; then
+if [[ "${1:-}" == "--profile" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "[start-test-server] ERROR: --profile requires a value." >&2
+    echo "  Usage: $0 [--profile <name>] [--compat]" >&2
+    exit 1
+  fi
   PROFILE="${2}"
   shift 2
 elif [[ "${1:-}" == "--compat" ]]; then
   # Legacy alias kept for backwards compat
   PROFILE="supabase.test"
-  shift 1
+  shift
+fi
+
+# Reject any remaining unknown arguments
+if [[ -n "${1:-}" ]]; then
+  echo "[start-test-server] ERROR: Unknown argument: ${1}" >&2
+  echo "  Usage: $0 [--profile <name>] [--compat]" >&2
+  exit 1
 fi
 
 # ── Validate env file exists ──────────────────────────────────────────────────
 if [[ -n "$PROFILE" ]]; then
   ENV_FILE="$ROOT/.env.${PROFILE}"
   if [[ ! -f "$ENV_FILE" ]]; then
-    echo "[start-test-server] ERROR: $ENV_FILE not found."
-    echo "  Run: node scripts/gen-env-test.mjs"
+    echo "[start-test-server] ERROR: $ENV_FILE not found." >&2
+    echo "  Run: node scripts/gen-env-test.mjs" >&2
     exit 1
   fi
   echo "[start-test-server] Profile: ${PROFILE} (${ENV_FILE})"
