@@ -12,7 +12,6 @@ import path        from 'path'
 const mode      = process.env.__TEST_MODE ?? 'test'
 const ROOT      = path.resolve(process.cwd(), '..')
 const clientEnv = loadEnv(mode, process.cwd(), '')  // test-client/.env.test → SUPABASE_*
-const serverEnv = loadEnv(mode, ROOT, '')            // root .env.test → SUPARUST_*
 
 const BASE        = clientEnv.SUPABASE_URL
 const SERVICE_KEY = clientEnv.SUPABASE_SERVICE_KEY
@@ -58,11 +57,10 @@ async function apiPost(path, body, token = SERVICE_KEY) {
 export async function setup() {
   console.log(`[globalSetup] mode=${mode}, url=${BASE}`)
 
-  // Inject test env vars into child process — these win over .env
-  // because dotenvy skips vars already present in process env.
-  serverProcess = spawn('cargo', ['run', '--', 'start'], {
+  // Pass --profile <mode> so suparust loads ONLY .env.<mode> — no .env contamination
+  serverProcess = spawn('cargo', ['run', '--', '--profile', mode, 'start'], {
     cwd: ROOT,
-    env: { ...process.env, ...serverEnv },  // root .env.test: SUPARUST_PORT, SUPARUST_DB_DATA_DIR, etc.
+    env: process.env,  // no injection — --profile handles isolation
     shell: true,
     stdio: ['ignore', 'pipe', 'pipe'],  // pipe both stdout+stderr — TracingWriter::Stdout uses stdout
   })
@@ -114,8 +112,15 @@ export async function setup() {
 export async function teardown() {
   if (serverProcess) {
     console.log('[globalSetup] Stopping test server...')
-    serverProcess.kill('SIGTERM')
-    await new Promise(r => setTimeout(r, 1500))
+    // Use suparust stop --profile <mode> to cleanly remove PID file
+    const { spawnSync } = await import('child_process')
+    spawnSync('cargo', ['run', '--', '--profile', mode, 'stop'], {
+      cwd: ROOT,
+      env: process.env,
+      shell: true,
+      stdio: 'inherit',
+    })
+    await new Promise(r => setTimeout(r, 1000))
     console.log('[globalSetup] Server stopped.')
   }
 }
