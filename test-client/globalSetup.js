@@ -121,10 +121,12 @@ export async function teardown() {
       timeout: 120_000,  // 120s — allows cargo compile on first run
     })
     if (result.error || result.status !== 0) {
-      // stop command failed — kill the process directly as fallback
-      console.warn(`[globalSetup] suparust stop failed (status=${result.status}) — killing directly`)
-      serverProcess.kill('SIGTERM')
-      await new Promise(r => setTimeout(r, 2000))
+      // stop command failed — surface the error explicitly, do NOT fall back to SIGTERM
+      // (SIGTERM leaves PID file behind, poisoning the next run — same problem we're solving)
+      throw new Error(
+        `[globalSetup] suparust stop --profile ${mode} failed (status=${result.status ?? 'timeout'}).` +
+        ` PID file may be stale. Run: cargo run -- --profile ${mode} stop`
+      )
     }
     console.log('[globalSetup] Server stopped.')
   }
