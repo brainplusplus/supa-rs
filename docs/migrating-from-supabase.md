@@ -123,6 +123,54 @@ These Supabase variables have no equivalent in SupaRust (services not present):
 
 ---
 
+## Running with Profiles (Environment Isolation)
+
+SupaRust supports profile-based environment isolation via the `--profile` flag. This replaces the need to inject env vars manually or manage multiple `.env` files by hand.
+
+### Profile modes
+
+| Command | Env loaded | PID file |
+|---|---|---|
+| `suparust start` | `.env` (silent ok if missing) | `.suparust.local.<port>.pid` |
+| `suparust start --profile test` | `.env.test` (hard error if missing) | `.suparust.profile.test.<port>.pid` |
+| `suparust start --env-file /path/custom.env` | `custom.env` only | `.suparust.env.<filename>.<port>.pid` |
+| `--profile x --env-file y` | — | error: cannot use both |
+
+**Isolation is total** — when `--profile` or `--env-file` is specified, `.env` is never loaded. Zero overlay, zero leakage.
+
+### Why default identity is `local`
+
+When no profile is given, SupaRust uses `local` as the identity. This is intentional:
+
+- **Convention**: `.env` = local dev in Supabase, Next.js, Vite, and docker-compose — `local` matches this universal mental model
+- **Determinism**: PID file `.suparust.local.<port>.pid` is predictable even in default mode — no anonymous `.suparust.pid` that collides between instances
+- **Consistency**: every running instance has an explicit identity (`local`, `profile.test`, `env.custom`) — `stop` and `status` always target the right instance
+
+### All commands respect `--profile`
+
+The flag works globally — before or after any subcommand:
+
+```bash
+suparust --profile test start
+suparust start --profile test     # same thing
+
+suparust stop   --profile test
+suparust status --profile test
+suparust restart --profile test
+```
+
+### Multi-instance example
+
+```bash
+suparust start --profile dev    # .suparust.profile.dev.3000.pid
+suparust start --profile test   # .suparust.profile.test.53001.pid
+
+suparust status --profile test
+suparust stop   --profile dev
+```
+
+---
+
 ## Quick Migration Example
 
 **Your existing Supabase `.env`:**

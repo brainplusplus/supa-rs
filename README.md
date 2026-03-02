@@ -84,6 +84,22 @@ suparust logs               # Tail app.log (daemon mode)
 suparust logs --lines 100   # Tail last N lines
 ```
 
+### Environment Profiles
+
+Isolate environments with `--profile`:
+
+```bash
+suparust start                    # .env → identity: local
+suparust start --profile test     # .env.test only → identity: profile.test
+suparust start --env-file dev.env # dev.env only   → identity: env.dev_env
+```
+
+The default identity `local` reflects the universal convention that `.env` = local development (Supabase, Next.js, Vite, docker-compose all use this). Every instance — including default — gets a deterministic PID file: `.suparust.<identity>.<port>.pid`.
+
+All subcommands (`stop`, `status`, `restart`) accept `--profile` too.
+
+**→ See [`docs/migrating-from-supabase.md`](docs/migrating-from-supabase.md#running-with-profiles-environment-isolation) for full profile reference.**
+
 ### `suparust status`
 
 ```
