@@ -1,6 +1,10 @@
 use crate::config::Config;
 use crate::db::{embed::EmbeddedPostgres, pool::create_pool};
+use axum::http::Request;
 use axum::Router;
+use tower::ServiceBuilder;
+use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::trace::TraceLayer;
 
 const PID_FILE: &str = ".suparust.pid";
 
@@ -116,7 +120,28 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             pool.clone(),
             cfg.storage_root.clone(),
             cfg.jwt_secret.clone(),
-        ));
+        ))
+        .layer(
+            ServiceBuilder::new()
+                .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+                .layer(PropagateRequestIdLayer::x_request_id())
+                .layer(
+                    TraceLayer::new_for_http()
+                        .make_span_with(|req: &Request<_>| {
+                            let req_id = req
+                                .headers()
+                                .get("x-request-id")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or("unknown");
+                            tracing::info_span!(
+                                "http_request",
+                                req_id = %req_id,
+                                method = %req.method(),
+                                path   = %req.uri().path(),
+                            )
+                        }),
+                ),
+        );
 
     let addr = format!("0.0.0.0:{}", cfg.port);
     tracing::info!("SupaRust listening on {}", addr);
