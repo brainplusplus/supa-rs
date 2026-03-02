@@ -9,16 +9,15 @@ import { spawn }   from 'child_process'
 import { loadEnv } from 'vite'
 import path        from 'path'
 
-const mode = process.env.__TEST_MODE ?? 'test'
-const env  = loadEnv(mode, process.cwd(), '')
+const mode      = process.env.__TEST_MODE ?? 'test'
+const ROOT      = path.resolve(process.cwd(), '..')
+const clientEnv = loadEnv(mode, process.cwd(), '')  // test-client/.env.test → SUPABASE_*
+const serverEnv = loadEnv(mode, ROOT, '')            // root .env.test → SUPARUST_*
 
-const BASE        = env.SUPABASE_URL
-const SERVICE_KEY = env.SUPABASE_SERVICE_KEY
-const TEST_EMAIL  = env.TEST_EMAIL
-const TEST_PASS   = env.TEST_PASSWORD
-
-// Repo root is one level up from test-client/
-const ROOT = path.resolve(process.cwd(), '..')
+const BASE        = clientEnv.SUPABASE_URL
+const SERVICE_KEY = clientEnv.SUPABASE_SERVICE_KEY
+const TEST_EMAIL  = clientEnv.TEST_EMAIL
+const TEST_PASS   = clientEnv.TEST_PASSWORD
 
 let serverProcess = null
 
@@ -57,9 +56,9 @@ export async function setup() {
   // because dotenvy skips vars already present in process env.
   serverProcess = spawn('cargo', ['run'], {
     cwd: ROOT,
-    env: { ...process.env, ...env },
-    shell: true,                          // required on Windows to resolve cargo from PATH
-    stdio: ['ignore', 'ignore', 'pipe'],  // suppress build noise, show errors
+    env: { ...process.env, ...serverEnv },  // root .env.test: SUPARUST_PORT, SUPARUST_DB_DATA_DIR, etc.
+    shell: true,
+    stdio: ['ignore', 'ignore', 'pipe'],
   })
 
   serverProcess.stderr.on('data', d => {
