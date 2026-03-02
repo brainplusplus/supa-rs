@@ -38,21 +38,21 @@ pub fn derive_pid_identity(profile: Option<&str>, env_file: Option<&Path>) -> St
 }
 
 fn load_env(profile: Option<&str>, env_file: Option<&Path>) {
-    match (env_file, profile) {
+    match (profile, env_file) {
         (Some(_), Some(_)) => {
             eprintln!("error: cannot use both --profile and --env-file");
             std::process::exit(1);
         }
-        (Some(path), None) => {
-            dotenvy::from_path(path).unwrap_or_else(|_| {
-                eprintln!("error: env file not found: {}", path.display());
+        (_, Some(path)) => {
+            dotenvy::from_path(path).unwrap_or_else(|e| {
+                eprintln!("error: failed to load env file '{}': {}", path.display(), e);
                 std::process::exit(1);
             });
         }
-        (None, Some(p)) => {
+        (Some(p), _) => {
             let filename = format!(".env.{}", p);
-            dotenvy::from_filename(&filename).unwrap_or_else(|_| {
-                eprintln!("error: profile '{}' not found: {}", p, filename);
+            dotenvy::from_filename(&filename).unwrap_or_else(|e| {
+                eprintln!("error: failed to load profile '{}' ({}): {}", p, filename, e);
                 std::process::exit(1);
             });
         }
@@ -67,6 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     load_env(cli.profile.as_deref(), cli.env_file.as_deref());
+    let pid_identity = derive_pid_identity(cli.profile.as_deref(), cli.env_file.as_deref());
+    // Set for Config::from_env() to use when deriving pid_file
+    std::env::set_var("SUPARUST_PID_IDENTITY", &pid_identity);
 
     match cli.command {
         Some(Command::Start { daemon: true, .. }) => cli::start::cmd_start_daemon().await,
