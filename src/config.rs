@@ -15,6 +15,8 @@ pub struct Config {
     pub service_key: String,
     pub log_level: String,   // SUPARUST_LOG_LEVEL
     pub log_format: String,  // SUPARUST_LOG_FORMAT: "pretty" | "json"
+    pub env: String,         // SUPARUST_ENV, default "local"
+    pub pid_file: String,    // derived from env+port, or SUPARUST_PID_FILE override
 }
 
 impl Config {
@@ -66,6 +68,12 @@ impl Config {
             })
             .unwrap_or(3000);
 
+        let env_name = env::var("SUPARUST_ENV")
+            .unwrap_or_else(|_| "local".to_string());
+
+        let pid_file = env::var("SUPARUST_PID_FILE")
+            .unwrap_or_else(|_| format!(".suparust.{}.{}.pid", env_name, port));
+
         Self {
             database_url: env::var("SUPARUST_DB_URL")
                 .or_else(|_| env::var("DATABASE_URL"))
@@ -82,6 +90,8 @@ impl Config {
             service_key,
             log_level: env::var("SUPARUST_LOG_LEVEL").unwrap_or_else(|_| "info".to_string()),
             log_format,
+            env: env_name,
+            pid_file,
         }
     }
 }
