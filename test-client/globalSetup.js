@@ -20,19 +20,19 @@ const TEST_EMAIL  = clientEnv.TEST_EMAIL
 const TEST_PASS   = clientEnv.TEST_PASSWORD
 
 let serverProcess = null
+let serverExited  = false
 
 // ── HTTP health check: retry until /auth/v1/health returns 200 ─────────────
-// Using /auth/v1/health (not plain TCP) ensures DB + migrations are ready,
-// not just that the port is open.
+// Uses a shared abort flag so server exit can cancel the polling loop.
 async function waitForServer(baseUrl, timeout = 300_000) {
   const start = Date.now()
   let warned = false
   while (Date.now() - start < timeout) {
+    if (serverExited) throw new Error(`[globalSetup] Server exited before becoming ready`)
     try {
       const res = await fetch(`${baseUrl}/auth/v1/health`)
       if (res.ok) return
     } catch {}
-    // Warn after 30s — likely a first-run pg-embed download (~50MB)
     if (!warned && Date.now() - start > 30_000) {
       console.log('[globalSetup] Still waiting... first run downloads pg-embed binary (~50MB), this may take a few minutes.')
       warned = true
@@ -84,8 +84,9 @@ export async function setup() {
   })
 
   serverProcess.on('exit', code => {
+    serverExited = true
     if (code !== null && code !== 0) {
-      console.error(`[globalSetup] Server exited unexpectedly with code ${code}`)
+      console.error(`[globalSetup] Server exited with code ${code} — check output above for details`)
     }
   })
 
