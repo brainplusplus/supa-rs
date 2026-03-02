@@ -58,6 +58,7 @@ export async function setup() {
   serverProcess = spawn('cargo', ['run'], {
     cwd: ROOT,
     env: { ...process.env, ...env },
+    shell: true,                          // required on Windows to resolve cargo from PATH
     stdio: ['ignore', 'ignore', 'pipe'],  // suppress build noise, show errors
   })
 
