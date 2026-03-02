@@ -24,18 +24,18 @@ pub fn cmd_stop() {
         }
         Err(_) => {
             // No PID file — try to find the process by port
-            println!("No {} found — searching for process on port {}...", pid_file, cfg.port);
+            println!("No {} found — searching for process on port {}...", pid_file, cfg.server.port);
 
-            match find_pid_on_port(&cfg.port.to_string()) {
+            match find_pid_on_port(&cfg.server.port.to_string()) {
                 Some(pid) => {
                     if kill_pid(pid) {
-                        println!("SupaRust stopped (PID {} found via port {})", pid, cfg.port);
+                        println!("SupaRust stopped (PID {} found via port {})", pid, cfg.server.port);
                     } else {
                         println!("Process {} was not running", pid);
                     }
                 }
                 None => {
-                    println!("No process found on port {} — server is not running", cfg.port);
+                    println!("No process found on port {} — server is not running", cfg.server.port);
                 }
             }
         }

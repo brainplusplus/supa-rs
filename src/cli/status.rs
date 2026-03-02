@@ -5,7 +5,7 @@ pub fn cmd_status() {
         .map(|s| s.trim().to_string())
         .ok();
 
-    let addr = format!("127.0.0.1:{}", cfg.port);
+    let addr = format!("127.0.0.1:{}", cfg.server.port);
     let alive = std::net::TcpStream::connect_timeout(
         &addr.parse().unwrap_or_else(|_| "127.0.0.1:3000".parse().unwrap()),
         std::time::Duration::from_secs(1),
@@ -20,7 +20,7 @@ pub fn cmd_status() {
         "STOPPED".to_string()
     };
 
-    let base = format!("http://localhost:{}", cfg.port);
+    let base = format!("http://localhost:{}", cfg.server.port);
     let anon_key = std::env::var("SUPARUST_ANON_KEY")
         .unwrap_or_else(|_| "(not set — check .env)".to_string());
     let service_key = std::env::var("SUPARUST_SERVICE_KEY")
