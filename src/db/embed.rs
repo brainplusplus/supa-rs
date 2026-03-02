@@ -9,12 +9,51 @@ pub struct EmbeddedPostgres {
     pub connection_string: String,
 }
 
+/// Returns the pg-embed binary cache directory — cross-platform, no extra crates.
+///
+/// | Platform | Path                                         |
+/// |----------|----------------------------------------------|
+/// | Windows  | `%LOCALAPPDATA%\pg-embed`                    |
+/// | macOS    | `$HOME/Library/Caches/pg-embed`              |
+/// | Linux    | `$XDG_CACHE_HOME/pg-embed` or `~/.cache/pg-embed` |
+fn pg_embed_cache_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("LOCALAPPDATA").ok().map(|d| PathBuf::from(d).join("pg-embed"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var("HOME").ok().map(|d| PathBuf::from(d).join("Library").join("Caches").join("pg-embed"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // XDG_CACHE_HOME first, fallback to ~/.cache
+        let base = std::env::var("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::env::var("HOME").map(|h| PathBuf::from(h).join(".cache")).unwrap_or_else(|_| PathBuf::from("/tmp"))
+            });
+        Some(base.join("pg-embed"))
+    }
+}
+
+/// Clear the pg-embed binary cache. Called when all retry attempts fail,
+/// indicating a corrupt cache rather than a transient lock issue.
+fn clear_pg_embed_cache() {
+    if let Some(cache) = pg_embed_cache_dir() {
+        if cache.exists() {
+            match std::fs::remove_dir_all(&cache) {
+                Ok(()) => tracing::info!("Cleared pg-embed cache at {}", cache.display()),
+                Err(e) => tracing::warn!("Could not clear pg-embed cache {}: {}", cache.display(), e),
+            }
+        }
+    }
+}
+
 impl EmbeddedPostgres {
     pub async fn start(data_dir: &str) -> Result<Self, Box<dyn std::error::Error>> {
         tracing::info!("Setting up embedded PostgreSQL (first run downloads binary ~50MB)...");
 
-        // Retry up to 3 times — Windows antivirus / file locking can cause
-        // transient failures during zip extraction on first run.
         let make_settings = || {
             (
                 PgSettings {
@@ -31,36 +70,43 @@ impl EmbeddedPostgres {
             )
         };
 
-        let mut pg = {
-            let mut last_err: Box<dyn std::error::Error> = "pg-embed init failed".into();
-            let mut result = None;
-            for attempt in 1..=3u8 {
-                let (ps, fs) = make_settings();
-                match PgEmbed::new(ps, fs).await {
-                    Ok(p) => { result = Some(p); break; }
-                    Err(e) => {
-                        last_err = e.into();
-                        if attempt < 3 {
-                            tracing::warn!(
-                                "pg-embed setup failed (attempt {attempt}/3), retrying in 5s... \
-                                 On Windows: ensure antivirus is not blocking %LOCALAPPDATA%\\pg-embed"
-                            );
-                            tokio::time::sleep(Duration::from_secs(5)).await;
-                        }
+        // Phase 1: retry up to 3 times for transient Windows file-lock issues.
+        let mut result = None;
+        for attempt in 1..=3u8 {
+            let (ps, fs) = make_settings();
+            match PgEmbed::new(ps, fs).await {
+                Ok(p) => { result = Some(p); break; }
+                Err(e) => {
+                    tracing::warn!("pg-embed init error (attempt {attempt}/3): {e}");
+                    if attempt < 3 {
+                        tracing::warn!(
+                            "pg-embed setup failed (attempt {attempt}/3), retrying in 5s... \
+                             On Windows: ensure antivirus is not blocking %LOCALAPPDATA%\\pg-embed"
+                        );
+                        tokio::time::sleep(Duration::from_secs(5)).await;
                     }
                 }
             }
-            match result {
-                Some(p) => p,
-                None => {
-                    tracing::error!(
-                        "pg-embed failed after 3 attempts. \
-                         On Windows: delete %LOCALAPPDATA%\\pg-embed and temporarily disable antivirus, \
-                         then run: cargo run -- start"
-                    );
-                    return Err(last_err);
-                }
-            }
+        }
+
+        // Phase 2: all retries failed — likely corrupt cache. Clear it and try once more.
+        let mut pg = if let Some(p) = result {
+            p
+        } else {
+            tracing::warn!(
+                "All 3 attempts failed — cache may be corrupt. \
+                 Clearing %LOCALAPPDATA%\\pg-embed and retrying once..."
+            );
+            clear_pg_embed_cache();
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let (ps, fs) = make_settings();
+            PgEmbed::new(ps, fs).await.map_err(|e| {
+                tracing::error!(
+                    "pg-embed failed after cache clear. \
+                     Try disabling antivirus for %LOCALAPPDATA%\\pg-embed, then run: cargo run -- start"
+                );
+                Box::<dyn std::error::Error>::from(e.to_string())
+            })?
         };
 
         // setup() runs initdb — skip if data dir already initialized

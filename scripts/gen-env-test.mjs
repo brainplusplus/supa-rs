@@ -21,6 +21,7 @@
  */
 import crypto from 'crypto'
 import fs     from 'fs'
+import os     from 'os'
 import path   from 'path'
 
 // ── Paths ──────────────────────────────────────────────────────────────────
@@ -47,16 +48,41 @@ const TEST_PASS   = 'Password123!'
 // ── Flags ──────────────────────────────────────────────────────────────────
 const isRegen = process.argv.includes('--regen')
 
+// ── pg-embed system cache path (cross-platform) ────────────────────────────
+// Mirrors the logic in src/db/embed.rs pg_embed_cache_dir().
+// Windows: %LOCALAPPDATA%\pg-embed
+// macOS:   $HOME/Library/Caches/pg-embed
+// Linux:   $XDG_CACHE_HOME/pg-embed or ~/.cache/pg-embed
+function pgEmbedCacheDir() {
+  const plat = process.platform
+  if (plat === 'win32') {
+    const local = process.env.LOCALAPPDATA
+    return local ? path.join(local, 'pg-embed') : null
+  }
+  if (plat === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Caches', 'pg-embed')
+  }
+  // Linux / other
+  const xdg = process.env.XDG_CACHE_HOME
+  const base = xdg ? xdg : path.join(os.homedir(), '.cache')
+  return path.join(base, 'pg-embed')
+}
+
+function wipePgEmbedCache() {
+  const cacheDir = pgEmbedCacheDir()
+  if (!cacheDir || !fs.existsSync(cacheDir)) return
+  fs.rmSync(cacheDir, { recursive: true, force: true })
+  console.log(`[gen-env-test] Wiped pg-embed system cache at ${cacheDir}`)
+  console.log(`[gen-env-test] Next run will re-download the pg-embed binary (~50MB)`)
+}
+
 // ── Step 1: Wipe test data dirs if --regen ─────────────────────────────────
-// Preserves pg-embed binary cache (extracted/) — only wipe PostgreSQL cluster files.
-// Binary cache is ~50MB and takes minutes to download; no need to re-download on regen.
+// Also wipes the pg-embed system cache — ensures a clean extraction on next run.
+// Prevents "Failed to unpack PostgreSQL binaries" from a partially-extracted cache.
 function wipePgDir(dir, label) {
   if (!fs.existsSync(dir)) return
-  for (const entry of fs.readdirSync(dir)) {
-    if (entry === 'extracted') continue // preserve pg-embed binary cache (~50MB)
-    fs.rmSync(path.join(dir, entry), { recursive: true, force: true })
-  }
-  console.log(`[gen-env-test] Wiped ${label} cluster data (preserved extracted/ binary cache)`)
+  fs.rmSync(dir, { recursive: true, force: true })
+  console.log(`[gen-env-test] Wiped ${label} cluster data`)
 }
 
 function wipeStorageDir(dir, label) {
@@ -66,6 +92,7 @@ function wipeStorageDir(dir, label) {
 }
 
 if (isRegen) {
+  wipePgEmbedCache()
   wipePgDir(PG_TEST_DIR, 'pg-test')
   wipeStorageDir(STORAGE_TEST_DIR, 'storage-test')
   wipePgDir(PG_COMPAT_DIR, 'pg-compat')
