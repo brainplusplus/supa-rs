@@ -11,6 +11,8 @@ patch.js
 .env.*.local
 .env.test
 test-client/.env.test
+.env.supabase.test
+test-client/.env.supabase.test
 node_modules
 .cursor
 .claude
