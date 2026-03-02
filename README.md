@@ -28,6 +28,7 @@
 | 🛡️ | **Row-Level Security** | Enforced via `SET LOCAL ROLE` + JWT claims per request |
 | 🏗️ | **SeaQuery SQL builder** | Injection-safe AST-based query construction for the REST layer |
 | 📊 | **Structured logging** | JSON logs with request ID correlation — plug into any log pipeline |
+| 🔀 | **Multi-instance safe** | Per-env PID files — production and test can run concurrently |
 
 ---
 
@@ -103,6 +104,7 @@ All config via `.env` or environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `SUPARUST_PORT` | `3000` | HTTP listen port |
+| `SUPARUST_ENV` | `local` | Environment name — used in PID filename |
 | `SUPARUST_JWT_SECRET` | auto-generated | HS256 signing secret |
 | `SUPARUST_ANON_KEY` | auto-generated | JWT for `anon` role |
 | `SUPARUST_SERVICE_KEY` | auto-generated | JWT for `service_role` |
@@ -111,6 +113,20 @@ All config via `.env` or environment variables:
 | `SUPARUST_DB_URL` | *(unset)* | External PG URL (disables embedded PG) |
 | `SUPARUST_LOG_LEVEL` | `info` | `trace` \| `debug` \| `info` \| `warn` \| `error` |
 | `SUPARUST_LOG_FORMAT` | `pretty` | `pretty` (dev) \| `json` (production) |
+| `SUPARUST_PID_FILE` | *(derived)* | Override PID file path (Docker / systemd) |
+
+### Multi-Instance PID Isolation
+
+SupaRust derives a unique PID filename per instance from `SUPARUST_ENV` + port — so production and test servers coexist without collision:
+
+| Instance | `SUPARUST_ENV` | Port | PID file |
+|---|---|---|---|
+| Local dev (default) | `local` | 3000 | `.suparust.local.3000.pid` |
+| Test runner | `test` | 53001 | `.suparust.test.53001.pid` |
+| Staging | `staging` | 8080 | `.suparust.staging.8080.pid` |
+| Production | `prod` | 3000 | `.suparust.prod.3000.pid` |
+
+`SUPARUST_PID_FILE` overrides the derived path entirely (useful for Docker, systemd socket activation, etc.).
 
 ---
 
@@ -123,6 +139,7 @@ All config via `.env` or environment variables:
 | `POST` | `/auth/v1/signup` | Register with email + password |
 | `POST` | `/auth/v1/token?grant_type=password` | Login, returns JWT session |
 | `GET` | `/auth/v1/user` | Get current user (requires Bearer token) |
+| `GET` | `/auth/v1/health` | Health check — confirms DB + migrations ready |
 
 ### REST `/rest/v1`
 
@@ -192,7 +209,7 @@ node scripts/gen-env-test.mjs
 ```
 
 This creates:
-- `.env.test` — server config (port 53001, isolated pg-embed at `data/pg-test/`)
+- `.env.test` — server config (port 53001, `SUPARUST_ENV=test`, isolated pg-embed at `data/pg-test/`)
 - `test-client/.env.test` — client config with matching JWT keys
 
 ### Run Tests
@@ -201,7 +218,7 @@ This creates:
 cd test-client && npm test
 ```
 
-Server starts automatically, all 21 tests run, server stops on completion.
+Server starts automatically on port 53001, all 21 tests run, server stops on completion.
 
 > **First run:** pg-embed downloads its binary (~50MB). This takes 2–5 minutes.
 > Subsequent runs start in seconds.
@@ -245,7 +262,7 @@ Use `--regen` when:
 ```
 src/
   main.rs          — CLI dispatch
-  config.rs        — Config::from_env(), .env generation
+  config.rs        — Config::from_env(), env + pid_file derivation
   tracing.rs       — init_tracing(), TracingWriter enum
   cli/
     start.rs       — foreground + daemon start, HTTP router setup
@@ -254,7 +271,7 @@ src/
     logs.rs        — tail app.log
   api/
     rest.rs        — PostgREST-compatible CRUD handlers
-    auth.rs        — signup / login / getUser
+    auth.rs        — signup / login / getUser / health
     storage.rs     — bucket + object management
   parser/
     filter.rs      — nom parser for col.op.val filter syntax
@@ -269,10 +286,12 @@ src/
     pool.rs        — sqlx PgPool creation
     execute.rs     — execute_query() with RLS context injection
 migrations/        — 6 SQL migration files (roles, auth, storage, RLS, grants)
+scripts/
+  gen-env-test.mjs — generates .env.test + test-client/.env.test
 docs/
   observability.md — Log forwarding guide (Vector, Loki, Datadog, journald)
   plans/           — Implementation design docs
-test-client/       — Vitest integration test suite
+test-client/       — Vitest integration test suite (21 tests)
 ```
 
 ---
@@ -284,6 +303,8 @@ test-client/       — Vitest integration test suite
 - [x] Storage (multipart, RLS-gated)
 - [x] Row-Level Security
 - [x] Structured logging with request ID correlation
+- [x] Multi-instance PID isolation (env + port based)
+- [x] Integration test suite (21 Vitest tests, auto start/stop)
 - [ ] Realtime WebSockets (logical replication → `axum::ws`)
 - [ ] Edge Functions (`wasmtime` or V8 isolate)
 - [ ] Local Studio UI dashboard
