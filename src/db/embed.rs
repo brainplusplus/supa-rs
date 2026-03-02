@@ -51,14 +51,14 @@ fn clear_pg_embed_cache() {
 }
 
 impl EmbeddedPostgres {
-    pub async fn start(data_dir: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn start(data_dir: &str, pg_port: u16) -> Result<Self, Box<dyn std::error::Error>> {
         tracing::info!("Setting up embedded PostgreSQL (first run downloads binary ~50MB)...");
 
         let make_settings = || {
             (
                 PgSettings {
                     database_dir: PathBuf::from(data_dir),
-                    port: 5433,
+                    port: pg_port,
                     user: "postgres".to_string(),
                     password: "postgres".to_string(),
                     auth_method: PgAuthMethod::Plain,

@@ -95,7 +95,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         }
         None => {
             tracing::info!("Starting embedded PostgreSQL in {}", cfg.database.data_dir);
-            let embedded = EmbeddedPostgres::start(&cfg.database.data_dir).await?;
+            // pg_port is offset from HTTP port to ensure uniqueness per instance.
+            // e.g. HTTP 3000 → PG 13000, HTTP 53001 → PG 63001, HTTP 53002 → PG 63002
+            let pg_port = cfg.server.port + 10_000;
+            let embedded = EmbeddedPostgres::start(&cfg.database.data_dir, pg_port).await?;
             let cs = embedded.connection_string.clone();
             (cs, Some(embedded))
         }
