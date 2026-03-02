@@ -11,24 +11,57 @@ pub struct EmbeddedPostgres {
 
 impl EmbeddedPostgres {
     pub async fn start(data_dir: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let pg_settings = PgSettings {
-            database_dir: PathBuf::from(data_dir),
-            port: 5433,
-            user: "postgres".to_string(),
-            password: "postgres".to_string(),
-            auth_method: PgAuthMethod::Plain,
-            persistent: true,
-            timeout: Some(Duration::from_secs(300)), // 300s — allows first-run binary download (~50MB)
-            migration_dir: None,
-        };
-
-        let fetch_settings = PgFetchSettings {
-            version: PG_V15,
-            ..Default::default()
-        };
-
         tracing::info!("Setting up embedded PostgreSQL (first run downloads binary ~50MB)...");
-        let mut pg = PgEmbed::new(pg_settings, fetch_settings).await?;
+
+        // Retry up to 3 times — Windows antivirus / file locking can cause
+        // transient failures during zip extraction on first run.
+        let make_settings = || {
+            (
+                PgSettings {
+                    database_dir: PathBuf::from(data_dir),
+                    port: 5433,
+                    user: "postgres".to_string(),
+                    password: "postgres".to_string(),
+                    auth_method: PgAuthMethod::Plain,
+                    persistent: true,
+                    timeout: Some(Duration::from_secs(300)),
+                    migration_dir: None,
+                },
+                PgFetchSettings { version: PG_V15, ..Default::default() },
+            )
+        };
+
+        let mut pg = {
+            let mut last_err: Box<dyn std::error::Error> = "pg-embed init failed".into();
+            let mut result = None;
+            for attempt in 1..=3u8 {
+                let (ps, fs) = make_settings();
+                match PgEmbed::new(ps, fs).await {
+                    Ok(p) => { result = Some(p); break; }
+                    Err(e) => {
+                        last_err = e.into();
+                        if attempt < 3 {
+                            tracing::warn!(
+                                "pg-embed setup failed (attempt {attempt}/3), retrying in 5s... \
+                                 On Windows: ensure antivirus is not blocking %LOCALAPPDATA%\\pg-embed"
+                            );
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                        }
+                    }
+                }
+            }
+            match result {
+                Some(p) => p,
+                None => {
+                    tracing::error!(
+                        "pg-embed failed after 3 attempts. \
+                         On Windows: delete %LOCALAPPDATA%\\pg-embed and temporarily disable antivirus, \
+                         then run: cargo run -- start"
+                    );
+                    return Err(last_err);
+                }
+            }
+        };
 
         // setup() runs initdb — skip if data dir already initialized
         let pg_version_file = PathBuf::from(data_dir).join("PG_VERSION");
