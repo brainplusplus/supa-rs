@@ -43,16 +43,16 @@ fn load_env(profile: Option<&str>, env_file: Option<&Path>) {
             eprintln!("error: cannot use both --profile and --env-file");
             std::process::exit(1);
         }
-        (_, Some(path)) => {
-            dotenvy::from_path(path).unwrap_or_else(|e| {
-                eprintln!("error: failed to load env file '{}': {}", path.display(), e);
-                std::process::exit(1);
-            });
-        }
         (Some(p), _) => {
             let filename = format!(".env.{}", p);
             dotenvy::from_filename(&filename).unwrap_or_else(|e| {
                 eprintln!("error: failed to load profile '{}' ({}): {}", p, filename, e);
+                std::process::exit(1);
+            });
+        }
+        (None, Some(path)) => {
+            dotenvy::from_path(path).unwrap_or_else(|e| {
+                eprintln!("error: failed to load env file '{}': {}", path.display(), e);
                 std::process::exit(1);
             });
         }
