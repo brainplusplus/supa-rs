@@ -1,10 +1,19 @@
 /**
- * Vitest global setup — runs once before all test files.
+ * Vitest global setup — runs once before all test files in Node context.
  * Creates the seeded test user and avatars bucket via the API.
+ *
+ * Reads config from .env.test via loadEnv (same source as vitest.config.js).
+ * Mode is bridged from vitest.config.js via process.env.__TEST_MODE.
  */
+import { loadEnv } from 'vite'
 
-const BASE = 'http://127.0.0.1:3000'
-const SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIiwiaXNzIjoic3VwYXJ1c3QiLCJpYXQiOjE3NzIxNTUzNDh9.Y1lzcK2qOGv6TH-mU896Kw8uRvYG0eXckvrFsKP3iK8'
+const mode = process.env.__TEST_MODE ?? 'test'
+const env  = loadEnv(mode, process.cwd(), '')
+
+const BASE        = env.SUPABASE_URL
+const SERVICE_KEY = env.SUPABASE_SERVICE_KEY
+const TEST_EMAIL  = env.TEST_EMAIL
+const TEST_PASS   = env.TEST_PASSWORD
 
 async function apiPost(path, body, token = SERVICE_KEY) {
   const res = await fetch(`${BASE}${path}`, {
@@ -19,17 +28,17 @@ async function apiPost(path, body, token = SERVICE_KEY) {
 }
 
 export async function setup() {
-  // 1. Create test@suparust.dev via signup endpoint
+  console.log(`[globalSetup] mode=${mode}, base=${BASE}`)
+
+  // 1. Create seeded test user via signup endpoint
   const signupRes = await apiPost('/auth/v1/signup', {
-    email: 'test@suparust.dev',
-    password: 'Password123!',
+    email: TEST_EMAIL,
+    password: TEST_PASS,
   })
-  const signupData = await signupRes.json()
-  // 409 / "User already registered" is fine
   if (signupRes.ok) {
-    console.log('[globalSetup] Created test@suparust.dev')
+    console.log(`[globalSetup] Created ${TEST_EMAIL}`)
   } else {
-    console.log('[globalSetup] test@suparust.dev already exists (ok)')
+    console.log(`[globalSetup] ${TEST_EMAIL} already exists (ok)`)
   }
 
   // 2. Create avatars bucket via storage API
