@@ -70,22 +70,38 @@ impl EmbeddedPostgres {
             )
         };
 
-        // Phase 1: retry up to 3 times for transient Windows file-lock issues.
-        let mut result = None;
+        // Phase 1: retry new() + setup() together up to 3 times.
+        // setup() is where pg-embed actually unpacks the binary — that's the failure point.
+        // Transient Windows file-lock/antivirus issues can cause either step to fail.
+        let pg_version_file = PathBuf::from(data_dir).join("PG_VERSION");
+        let already_init = pg_version_file.exists();
+
+        let mut result: Option<PgEmbed> = None;
         for attempt in 1..=3u8 {
             let (ps, fs) = make_settings();
-            match PgEmbed::new(ps, fs).await {
-                Ok(p) => { result = Some(p); break; }
+            let new_result = PgEmbed::new(ps, fs).await;
+            match new_result {
                 Err(e) => {
-                    tracing::warn!("pg-embed init error (attempt {attempt}/3): {e}");
-                    if attempt < 3 {
-                        tracing::warn!(
-                            "pg-embed setup failed (attempt {attempt}/3), retrying in 5s... \
-                             On Windows: ensure antivirus is not blocking %LOCALAPPDATA%\\pg-embed"
-                        );
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    tracing::warn!("pg-embed new() error (attempt {attempt}/3): {e}");
+                }
+                Ok(mut p) => {
+                    if already_init {
+                        result = Some(p);
+                        break;
+                    }
+                    match p.setup().await {
+                        Ok(()) => { result = Some(p); break; }
+                        Err(e) => {
+                            tracing::warn!("pg-embed setup() error (attempt {attempt}/3): {e}");
+                        }
                     }
                 }
+            }
+            if attempt < 3 {
+                tracing::warn!(
+                    "Retrying in 5s... On Windows: ensure antivirus is not blocking %LOCALAPPDATA%\\pg-embed"
+                );
+                tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
 
@@ -95,26 +111,32 @@ impl EmbeddedPostgres {
         } else {
             tracing::warn!(
                 "All 3 attempts failed — cache may be corrupt. \
-                 Clearing %LOCALAPPDATA%\\pg-embed and retrying once..."
+                 Clearing pg-embed system cache and retrying once..."
             );
             clear_pg_embed_cache();
             tokio::time::sleep(Duration::from_secs(2)).await;
             let (ps, fs) = make_settings();
-            PgEmbed::new(ps, fs).await.map_err(|e| {
+            let mut p = PgEmbed::new(ps, fs).await.map_err(|e| {
                 tracing::error!(
-                    "pg-embed failed after cache clear. \
+                    "pg-embed new() failed after cache clear. \
                      Try disabling antivirus for %LOCALAPPDATA%\\pg-embed, then run: cargo run -- start"
                 );
                 Box::<dyn std::error::Error>::from(e.to_string())
-            })?
+            })?;
+            if !already_init {
+                p.setup().await.map_err(|e| {
+                    tracing::error!(
+                        "pg-embed setup() failed after cache clear. \
+                         Try disabling antivirus for %LOCALAPPDATA%\\pg-embed, then run: cargo run -- start"
+                    );
+                    Box::<dyn std::error::Error>::from(e.to_string())
+                })?;
+            }
+            p
         };
 
-        // setup() runs initdb — skip if data dir already initialized
-        let pg_version_file = PathBuf::from(data_dir).join("PG_VERSION");
-        if pg_version_file.exists() {
+        if already_init {
             tracing::info!("Existing data directory detected, skipping initdb");
-        } else {
-            pg.setup().await?;
         }
 
         tracing::info!("Starting embedded PostgreSQL in {}", data_dir);
