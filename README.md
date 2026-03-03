@@ -139,14 +139,14 @@ All config via `.env` or environment variables:
 
 ### Multi-Instance PID Isolation
 
-SupaRust derives a unique PID filename per instance from `SUPARUST_ENV` + port — so production and test servers coexist without collision:
+SupaRust derives a unique PID filename per instance from the profile identity + port — so multiple environments coexist without collision:
 
-| Instance | `SUPARUST_ENV` | Port | PID file |
-|---|---|---|---|
-| Local dev (default) | `local` | 3000 | `.suparust.local.3000.pid` |
-| Test runner | `test` | 53001 | `.suparust.test.53001.pid` |
-| Staging | `staging` | 8080 | `.suparust.staging.8080.pid` |
-| Production | `prod` | 3000 | `.suparust.prod.3000.pid` |
+| Command | PID file |
+|---|---|
+| `suparust start` | `.suparust.local.3000.pid` |
+| `suparust start --profile test` | `.suparust.profile.test.53001.pid` |
+| `suparust start --profile staging` | `.suparust.profile.staging.8080.pid` |
+| `suparust start --env-file prod.env` | `.suparust.env.prod_env.3000.pid` |
 
 `SUPARUST_PID_FILE` overrides the derived path entirely (useful for Docker, systemd socket activation, etc.).
 
@@ -231,16 +231,19 @@ node scripts/gen-env-test.mjs
 ```
 
 This creates:
-- `.env.test` — server config (port 53001, `SUPARUST_ENV=test`, isolated pg-embed at `data/pg-test/`)
+- `.env.test` — server config (port 53001, isolated pg-embed at `data/pg-test/`)
 - `test-client/.env.test` — client config with matching JWT keys
+- `.env.supabase.test` — compat server config (port 53002, Supabase alias vars)
+- `test-client/.env.supabase.test` — compat client config
 
 ### Run Tests
 
 ```bash
-cd test-client && npm test
+cd test-client && npm test             # SUPARUST_* style (port 53001)
+cd test-client && npm run test:compat  # Supabase alias style (port 53002)
 ```
 
-Server starts automatically on port 53001, all 21 tests run, server stops on completion.
+Server starts automatically, all 21 tests run, server stops on completion. Both suites can run concurrently — each uses a separate PostgreSQL port.
 
 > **First run:** pg-embed downloads its binary (~50MB). This takes 2–5 minutes.
 > Subsequent runs start in seconds.
@@ -310,11 +313,13 @@ src/
     execute.rs     — execute_query() with RLS context injection
 migrations/        — 6 SQL migration files (roles, auth, storage, RLS, grants)
 scripts/
-  gen-env-test.mjs — generates .env.test + test-client/.env.test
+  gen-env-test.mjs — generate 4 env files (2 pairs: SUPARUST_* + Supabase compat)
+  start-test-server.sh — manual test server bootstrap helper
 docs/
+  migrating-from-supabase.md — Supabase → SupaRust env var mapping + profile guide
   observability.md — Log forwarding guide (Vector, Loki, Datadog, journald)
   plans/           — Implementation design docs
-test-client/       — Vitest integration test suite (21 tests)
+test-client/       — Vitest integration test suite (21 tests, 2 modes)
 ```
 
 ---
