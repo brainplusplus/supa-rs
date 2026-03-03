@@ -115,7 +115,7 @@ fn kill_pid(pid: u32) -> bool {
     #[cfg(target_os = "windows")]
     {
         let result = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F", "/T"])
+            .args(["/PID", &pid.to_string(), "/F"])
             .output();
 
         match result {
