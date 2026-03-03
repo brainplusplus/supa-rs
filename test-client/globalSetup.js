@@ -111,6 +111,17 @@ export async function setup() {
 // ── Teardown: stop server after all tests complete ─────────────────────────
 export async function teardown() {
   if (serverProcess) {
+    // Cleanup stale test data so next run is idempotent
+    // Must run before stop — server must be up for API calls
+    const deleteRes = await fetch(`${BASE}/storage/v1/bucket/admin-test-bucket`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${SERVICE_KEY}` },
+    })
+    if (deleteRes.ok) {
+      console.log('[globalSetup] Deleted admin-test-bucket')
+    }
+    // 404 = already gone (first run or previous cleanup) — both are fine
+
     console.log('[globalSetup] Stopping test server...')
     // Use suparust stop --profile <mode> to cleanly remove PID file + graceful shutdown
     const result = spawnSync('cargo', ['run', '--', '--profile', mode, 'stop'], {
