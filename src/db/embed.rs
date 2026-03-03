@@ -69,7 +69,9 @@ impl EmbeddedPostgres {
                 );
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        }        let make_settings = || {
+        }
+
+        let make_settings = || {
             (
                 PgSettings {
                     database_dir: PathBuf::from(data_dir),
