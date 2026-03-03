@@ -71,10 +71,14 @@ First tagged release. Core foundation is functional and tested.
 - No Studio UI dashboard
 - `postgresql_embedded` migration not yet done (planned before `v0.1.0`)
 
+### Roadmap to `v0.1.0-beta.1`
+
+- [ ] S3/MinIO/R2 backend for Storage (alongside existing local filesystem)
+- [ ] `SUPARUST_DB_MODE=embedded|external` — explicit mode, not inferred from DATABASE_URL
+- [ ] CI/CD pipeline (GitHub Actions)
+
 ### Roadmap to `v0.1.0`
 
-- [ ] Migrate embedded PG from `pg-embed` → `postgresql_embedded`
-- [ ] CI/CD pipeline (GitHub Actions)
 - [ ] One additional major feature (Realtime or Edge Functions)
 
 ### Roadmap to `v1.0.0`
