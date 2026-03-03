@@ -54,7 +54,22 @@ impl EmbeddedPostgres {
     pub async fn start(data_dir: &str, pg_port: u16) -> Result<Self, Box<dyn std::error::Error>> {
         tracing::info!("Setting up embedded PostgreSQL (first run downloads binary ~50MB)...");
 
-        let make_settings = || {
+        // Pre-flight: wait for pg_port to be free (orphan from crash/kill may still hold it).
+        // Poll up to 10s (50 × 200ms) before proceeding — avoids setup() failing due to port conflict.
+        for i in 0..50u8 {
+            let free = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", pg_port))
+                .await
+                .is_ok();
+            if free { break; }
+            if i == 0 {
+                tracing::warn!(
+                    "pg port {} still occupied — waiting for orphan process to release \
+                     (up to 10s). If this persists, kill the process holding that port.",
+                    pg_port
+                );
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }        let make_settings = || {
             (
                 PgSettings {
                     database_dir: PathBuf::from(data_dir),

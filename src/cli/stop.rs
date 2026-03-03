@@ -1,6 +1,7 @@
 pub fn cmd_stop() {
     let cfg = crate::config::Config::from_env();
     let pid_file = &cfg.pid_file;
+    let pg_port = cfg.server.port + 10_000;
 
     match std::fs::read_to_string(pid_file) {
         Ok(pid_str) => {
@@ -17,6 +18,7 @@ pub fn cmd_stop() {
             std::fs::remove_file(pid_file).ok();
 
             if was_running {
+                wait_port_free(pg_port, 15);
                 println!("SupaRust stopped (PID {})", pid);
             } else {
                 println!("Process {} was not running — PID file cleaned up", pid);
@@ -29,6 +31,7 @@ pub fn cmd_stop() {
             match find_pid_on_port(&cfg.server.port.to_string()) {
                 Some(pid) => {
                     if kill_pid(pid) {
+                        wait_port_free(pg_port, 15);
                         println!("SupaRust stopped (PID {} found via port {})", pid, cfg.server.port);
                     } else {
                         println!("Process {} was not running", pid);
@@ -40,6 +43,24 @@ pub fn cmd_stop() {
             }
         }
     }
+}
+
+/// Poll until `port` is free or `timeout_secs` elapses.
+/// Uses TcpListener::bind as the lightest possible probe — no network traffic.
+fn wait_port_free(port: u16, timeout_secs: u64) {
+    use std::time::{Duration, Instant};
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    let mut warned = false;
+    while Instant::now() < deadline {
+        let free = std::net::TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok();
+        if free { return; }
+        if !warned {
+            eprintln!("[stop] Waiting for pg port {} to release...", port);
+            warned = true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    eprintln!("[stop] pg port {} still busy after {}s — proceeding anyway", port, timeout_secs);
 }
 
 /// Find the PID of the process listening on the given port.
