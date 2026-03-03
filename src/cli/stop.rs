@@ -46,17 +46,28 @@ pub fn cmd_stop() {
 }
 
 /// Poll until `port` is free or `timeout_secs` elapses.
-/// Uses TcpListener::bind as the lightest possible probe — no network traffic.
+/// After 3s still busy: attempt to kill the orphan process holding the port,
+/// then continue polling. This handles force-killed suparust where the
+/// PostgreSQL child was not stopped cleanly via stop_db().
 fn wait_port_free(port: u16, timeout_secs: u64) {
     use std::time::{Duration, Instant};
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     let mut warned = false;
+    let mut kill_attempted = false;
     while Instant::now() < deadline {
         let free = std::net::TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok();
         if free { return; }
         if !warned {
             eprintln!("[stop] Waiting for pg port {} to release...", port);
             warned = true;
+        }
+        // After 3s still busy — orphan PostgreSQL child. Kill it.
+        if !kill_attempted && Instant::now() > deadline - Duration::from_secs(timeout_secs - 3) {
+            if let Some(orphan_pid) = find_pid_on_port(&port.to_string()) {
+                eprintln!("[stop] Killing orphan pg process (PID {}) on port {}", orphan_pid, port);
+                kill_pid(orphan_pid);
+            }
+            kill_attempted = true;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
